@@ -1,0 +1,9 @@
+FROM apache/kafka:4.2.0
+
+USER root
+RUN mkdir -p /opt/kafka/plugins/kafka-connect-ais
+COPY target/kafka-connect-ais-0.1.0-SNAPSHOT.jar /opt/kafka/plugins/kafka-connect-ais/
+COPY connect-distributed.properties /opt/kafka/config/connect-distributed.properties
+USER appuser
+
+CMD ["/opt/kafka/bin/connect-distributed.sh", "/opt/kafka/config/connect-distributed.properties"]

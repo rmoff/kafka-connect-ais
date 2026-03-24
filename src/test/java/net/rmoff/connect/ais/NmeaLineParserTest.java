@@ -1,4 +1,4 @@
-package dev.rmoff.connect.ais;
+package net.rmoff.connect.ais;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

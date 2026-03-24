@@ -1,4 +1,4 @@
-package dev.rmoff.connect.ais;
+package net.rmoff.connect.ais;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

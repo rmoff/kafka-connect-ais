@@ -1,4 +1,4 @@
-package dev.rmoff.connect.ais;
+package net.rmoff.connect.ais;
 
 import dk.dma.ais.message.*;
 import dk.dma.enav.model.geometry.Position;

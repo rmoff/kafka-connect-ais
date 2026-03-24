@@ -1,0 +1,64 @@
+---
+services:
+  broker:
+    image: apache/kafka:4.2.0
+    container_name: broker
+    ports:
+    # "`-._,-'"`-._,-'"`-._,-'"`-._,-'"`-._,-'"`-._,-'"`-._,-'
+    # An important note about accessing Kafka from clients on
+    # other machines:
+    # -------------------------------------------------------
+    #
+    # The config used here exposes port 9092 for _external_
+    # connections to the broker i.e. those from _outside_ the
+    # docker network. This could be from the host machine
+    # running docker, or maybe further afield if you've got a
+    # more complicated setup. If the latter is true, you will
+    # need to change the value 'localhost' in
+    # KAFKA_ADVERTISED_LISTENERS to one that is resolvable to
+    # the docker host from those remote clients.
+    #
+    # For connections _internal_ to the docker network, such as
+    # from other services and components, use broker:29092.
+    #
+    # See https://rmoff.net/2018/08/02/kafka-listeners-explained/
+    # "`-._,-'"`-._,-'"`-._,-'"`-._,-'"`-._,-'"`-._,-'"`-._,-'
+    #
+      - 9092:9092
+    environment:
+      # KRaft
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Listeners
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://broker:29092,CONTROLLER://broker:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Cluster
+      CLUSTER_ID: kafka-connect-ais-01
+      # Single-broker settings
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+  kafka-connect:
+    build:
+      context: .
+      dockerfile: Dockerfile.connect
+    container_name: kafka-connect
+    depends_on:
+      - broker
+    ports:
+      - 8083:8083
+
+  kcat:
+    image: edenhill/kcat:1.7.1
+    container_name: kcat
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        apk add jq;
+        while [ 1 -eq 1 ];do sleep 60;done

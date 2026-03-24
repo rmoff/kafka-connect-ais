@@ -1,11 +1,11 @@
-package dev.rmoff.connect.ais;
+package net.rmoff.connect.ais;
 
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 
 public class AisSchemas {
 
-    private static final String NAMESPACE = "dev.rmoff.connect.ais";
+    private static final String NAMESPACE = "net.rmoff.connect.ais";
 
     public static final Schema KEY_SCHEMA = Schema.INT32_SCHEMA;
 

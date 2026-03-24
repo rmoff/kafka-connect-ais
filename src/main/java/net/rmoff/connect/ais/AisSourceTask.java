@@ -1,4 +1,4 @@
-package dev.rmoff.connect.ais;
+package net.rmoff.connect.ais;
 
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;

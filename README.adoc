@@ -1,0 +1,196 @@
+= Kafka Connect AIS Source Connector
+
+A Kafka Connect source connector that ingests live https://en.wikipedia.org/wiki/Automatic_identification_system[AIS] (Automatic Identification System) maritime data from TCP endpoints and produces structured records to Kafka.
+
+It replaces the fragile `nc | gpsdecode | kafkacat` pipeline with a single connector that handles TCP connection management, NMEA sentence parsing, multi-sentence fragment assembly, and AIS message decoding natively.
+
+== What it does
+
+* Connects to AIS TCP data feeds (e.g., the Norwegian Coastal Administration's live feed at `153.44.253.27:5631`)
+* Decodes all 28 AIS message types into structured fields (position, vessel identity, base station reports, aids to navigation, safety messages, etc.)
+* Keys records by MMSI (vessel identifier) for natural partitioning
+* Reconnects automatically with exponential backoff when the TCP connection drops
+* Optionally routes messages to per-type topics (`.position`, `.static`, `.base_station`, etc.)
+
+== Quickstart
+
+Build the connector JAR:
+
+[source,bash]
+----
+mvn clean package -DskipTests
+----
+
+Start Kafka and Kafka Connect with the connector installed:
+
+[source,bash]
+----
+docker compose up -d --build
+----
+
+Wait for Connect to be ready:
+
+[source,bash]
+----
+curl -s localhost:8083/connectors 2>/dev/null | grep -c '\[' || echo 'not ready'
+# Repeat until you see: 1
+----
+
+Create the connector:
+
+[source,bash]
+----
+curl -s -X PUT http://localhost:8083/connectors/ais-source/config \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "connector.class": "net.rmoff.connect.ais.AisSourceConnector",
+    "ais.hosts": "153.44.253.27:5631",
+    "topic": "ais",
+    "tasks.max": "1"
+  }' | jq .
+----
+
+Check the connector is running:
+
+[source,bash]
+----
+curl -s localhost:8083/connectors/ais-source/status | jq .
+----
+
+Consume from the topic:
+
+[source,bash]
+----
+docker exec kcat kcat -b broker:29092 -t ais -C -c5 -J | jq '.'
+----
+
+You should see structured AIS records with fields like `mmsi`, `latitude`, `longitude`, `speed_over_ground`, `ship_name`, etc.
+
+To see just the vessels and their positions:
+
+[source,bash]
+----
+docker exec kcat kcat -b broker:29092 -t ais -C -c20 -J | \
+  jq -r '.payload | select(.latitude != null) |
+    "\(.mmsi) lat=\(.latitude) lon=\(.longitude) sog=\(.speed_over_ground) type=\(.msg_type)"'
+----
+
+Shut it all down:
+
+[source,bash]
+----
+docker compose down
+----
+
+== Configuration
+
+[cols="1,1,1,3"]
+|===
+|Property |Type |Default |Description
+
+|`ais.hosts`
+|STRING
+|_(required)_
+|Comma-separated `host:port` pairs for AIS TCP endpoints
+
+|`topic`
+|STRING
+|_(required)_
+|Kafka topic name (or topic prefix when `topic.per.type=true`)
+
+|`topic.per.type`
+|BOOLEAN
+|`false`
+|Route messages to per-type topics: `<topic>.position`, `<topic>.static`, `<topic>.base_station`, `<topic>.safety`, `<topic>.aton`, `<topic>.binary`, `<topic>.other`
+
+|`poll.timeout.ms`
+|LONG
+|`100`
+|Max ms to spend reading per `poll()` call
+
+|`batch.max.size`
+|INT
+|`500`
+|Max records per `poll()` batch
+
+|`reconnect.backoff.initial.ms`
+|LONG
+|`1000`
+|Initial reconnect delay
+
+|`reconnect.backoff.max.ms`
+|LONG
+|`60000`
+|Max reconnect delay (doubles each failure)
+
+|`fragment.timeout.ms`
+|LONG
+|`30000`
+|Timeout for incomplete multi-sentence messages
+
+|`decode.common.only`
+|BOOLEAN
+|`true`
+|When true, only the most useful message types get full field decoding (position, identity, base station, safety, AtoN). Binary/control types get common fields + `raw_nmea` only.
+|===
+
+== Output schema
+
+Every record includes these common fields:
+
+* `mmsi` (INT32) -- vessel identifier, also used as the record key
+* `msg_type` (INT32) -- AIS message type number
+* `receive_timestamp` (INT64) -- milliseconds since epoch from the tag block
+* `source_station` (STRING) -- receiving station ID from the tag block
+* `raw_nmea` (STRING) -- the original NMEA sentence(s), always present
+
+Position reports (types 1, 2, 3, 18, 19, 27) add: `latitude`, `longitude`, `speed_over_ground`, `course_over_ground`, `true_heading`, `nav_status`, `nav_status_text`, `rate_of_turn`, `timestamp_second`.
+
+Static/voyage data (types 5, 24) adds: `imo_number`, `callsign`, `ship_name`, `ship_type`, `ship_type_text`, `dimension_to_bow/stern/port/starboard`, `draught`, `destination`, `eta`.
+
+See the source for the full field list per message type.
+
+Invalid sentinel values (latitude 91.0, longitude 181.0, heading 511, etc.) are converted to `null`.
+
+== Headers
+
+Every record carries these Kafka headers for routing/filtering without deserialization:
+
+* `ais.msg_type` -- the message type as a string (e.g., `"1"`, `"5"`, `"18"`)
+* `ais.source_station` -- the receiving station ID
+
+== AIS data sources
+
+The default endpoint in the quickstart is the Norwegian Coastal Administration's public AIS feed. It streams roughly 15 messages per second of live vessel traffic around the Norwegian coast. No authentication required.
+
+Other public AIS TCP feeds exist -- search for "AIS TCP feed" or check https://www.aishub.net/[AISHub].
+
+== How it works
+
+This is a TCP stream source connector, which is a bit different from the typical database/API source pattern:
+
+* The TCP connection is opened in `start()` and persists across `poll()` calls
+* `poll()` reads whatever's buffered on the socket, parses NMEA sentences, decodes AIS messages, and returns SourceRecords
+* There's no replay -- if the connector is down, messages during downtime are lost. The data source doesn't buffer.
+* Reconnection with exponential backoff is the main failure-handling mechanism
+* `SO_TIMEOUT` on the socket prevents `poll()` from blocking forever on a stalled connection
+* `stop()` closes the socket from a different thread, which unblocks any pending read
+
+AIS message decoding is handled by https://github.com/dma-ais/AisLib[AisLib] from the Danish Maritime Authority.
+
+== Building
+
+Requires Java 11+ and Maven.
+
+[source,bash]
+----
+mvn clean package
+----
+
+The shaded JAR at `target/kafka-connect-ais-0.1.0-SNAPSHOT.jar` contains AisLib and its dependencies. Drop it into your Connect worker's `plugin.path` directory.
+
+== Credits
+
+Built with https://claude.ai/[Claude Code] using the https://github.com/rmoff/claude-code-skill-kafka-connect[kafka-connect Claude Code skill].
+
+AIS message decoding by https://github.com/dma-ais/AisLib[AisLib] (Danish Maritime Authority, Apache 2.0 license).
