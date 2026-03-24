@@ -2,7 +2,7 @@
 
 A Kafka Connect source connector that ingests live https://en.wikipedia.org/wiki/Automatic_identification_system[AIS] (Automatic Identification System) maritime data from TCP endpoints and produces structured records to Kafka.
 
-It replaces the fragile `nc | gpsdecode | kafkacat` pipeline with a single connector that handles TCP connection management, NMEA sentence parsing, multi-sentence fragment assembly, and AIS message decoding natively.
+It handles TCP connection management, NMEA sentence parsing, multi-sentence fragment assembly, and AIS message decoding natively.
 
 == What it does
 
@@ -14,6 +14,8 @@ It replaces the fragile `nc | gpsdecode | kafkacat` pipeline with a single conne
 
 == Quickstart
 
+You'll need Java 11+, Maven, Docker, and https://github.com/kcctl/kcctl[kcctl].
+
 Build the connector JAR:
 
 [source,bash]
@@ -21,65 +23,139 @@ Build the connector JAR:
 mvn clean package -DskipTests
 ----
 
-Start Kafka and Kafka Connect with the connector installed:
+Start Kafka, Schema Registry, and Kafka Connect:
 
 [source,bash]
 ----
 docker compose up -d --build
 ----
 
-Wait for Connect to be ready:
+Point kcctl at the Connect worker:
 
 [source,bash]
 ----
-curl -s localhost:8083/connectors 2>/dev/null | grep -c '\[' || echo 'not ready'
-# Repeat until you see: 1
+kcctl config set-context --cluster=http://localhost:8083 local
 ----
+
+Wait for Connect to be ready, then check that the plugin is loaded:
+
+[source,bash]
+----
+kcctl get plugins
+----
+
+You should see `net.rmoff.connect.ais.AisSourceConnector` in the list.
 
 Create the connector:
 
 [source,bash]
 ----
-curl -s -X PUT http://localhost:8083/connectors/ais-source/config \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "connector.class": "net.rmoff.connect.ais.AisSourceConnector",
-    "ais.hosts": "153.44.253.27:5631",
-    "topic": "ais",
-    "tasks.max": "1"
-  }' | jq .
+kcctl apply -f connector-ais.json
 ----
 
-Check the connector is running:
+Check it's running:
 
 [source,bash]
 ----
-curl -s localhost:8083/connectors/ais-source/status | jq .
+kcctl describe connector ais-source
 ----
 
-Consume from the topic:
+Consume some records with https://github.com/edenhill/kcat[kcat]:
 
 [source,bash]
 ----
-docker exec kcat kcat -b broker:29092 -t ais -C -c5 -J | jq '.'
+kcat -b localhost:9092 -t ais -C -s value=avro -r http://localhost:8081 -c 5 | jq '.'
 ----
 
-You should see structured AIS records with fields like `mmsi`, `latitude`, `longitude`, `speed_over_ground`, `ship_name`, etc.
-
-To see just the vessels and their positions:
+Or use the console consumer from the Schema Registry container:
 
 [source,bash]
 ----
-docker exec kcat kcat -b broker:29092 -t ais -C -c20 -J | \
-  jq -r '.payload | select(.latitude != null) |
-    "\(.mmsi) lat=\(.latitude) lon=\(.longitude) sog=\(.speed_over_ground) type=\(.msg_type)"'
+docker exec schema-registry kafka-avro-console-consumer \
+  --bootstrap-server broker:29092 \
+  --topic ais \
+  --from-beginning \
+  --max-messages 5 \
+  --property schema.registry.url=http://localhost:8081
 ----
 
 Shut it all down:
 
 [source,bash]
 ----
+kcctl delete connector ais-source
 docker compose down
+----
+
+=== Per-type topics
+
+Instead of a single topic, you can split messages into separate topics by category. Use `connector-ais-per-type.json`:
+
+[source,bash]
+----
+kcctl apply -f connector-ais-per-type.json
+----
+
+This creates separate topics:
+
+* `ais.position` -- vessel position reports (types 1, 2, 3, 9, 18, 19, 27)
+* `ais.static` -- vessel identity and voyage data (types 5, 24)
+* `ais.base_station` -- base station reports (types 4, 11)
+* `ais.aton` -- aids to navigation (type 21)
+* `ais.safety` -- safety messages (types 12, 14)
+* `ais.binary` -- application-specific binary (types 6, 8, 25, 26)
+* `ais.other` -- control/management (everything else)
+
+=== Working with the data
+
+Show live vessel positions:
+
+[source,bash]
+----
+kcat -b localhost:9092 -t ais.position -C -s value=avro -r http://localhost:8081 -u | \
+  jq -r '"\(.mmsi)  \(.latitude.double)  \(.longitude.double)  sog=\(.speed_over_ground.double)  \(.nav_status_text.string // "")"'
+----
+
+....
+258006890  70.286049  23.470331  sog=0.0    Moored
+257125290  66.395016  12.77815   sog=23.5   Under way using engine
+259225000  69.63761   18.003028  sog=0.1    Engaged in fishing
+257733500  62.340093  5.689755   sog=0.0    Under way sailing
+....
+
+Show vessel names and destinations:
+
+[source,bash]
+----
+kcat -b localhost:9092 -t ais.static -C -s value=avro -r http://localhost:8081 -u | \
+  jq -r '"\(.mmsi)  \(.ship_name.string // "-")  \(.ship_type_text.string // "-")  dest=\(.destination.string // "-")"'
+----
+
+....
+257073700  STOLMASUND    Cargo                   dest=CH 16
+257062790  TAIFUN        HSC                     dest=SALMAR TEKNISK
+259027590  FROY MASTER   Dredging/underwater ops  dest=FISHFARMS
+257275800  BJORNFJELL    Port tender             dest=NONVK
+....
+
+Show aids to navigation:
+
+[source,bash]
+----
+kcat -b localhost:9092 -t ais.aton -C -s value=avro -r http://localhost:8081 -u | \
+  jq -r '"\(.mmsi)  \(.aid_name.string // "-")  \(.latitude.double)  \(.longitude.double)  virtual=\(.virtual_aid.boolean)"'
+----
+
+....
+992651014  V 10        58.399653  12.320668  virtual=true
+992576420  TETRA SPAR  59.150701  5.013845   virtual=true
+....
+
+Check the registered Avro schemas:
+
+[source,bash]
+----
+curl -s http://localhost:8081/subjects | jq .
 ----
 
 == Configuration
@@ -152,6 +228,8 @@ See the source for the full field list per message type.
 
 Invalid sentinel values (latitude 91.0, longitude 181.0, heading 511, etc.) are converted to `null`.
 
+The Avro schema is registered automatically in Schema Registry. You can inspect it at http://localhost:8081/subjects/ais-value/versions/latest.
+
 == Headers
 
 Every record carries these Kafka headers for routing/filtering without deserialization:
@@ -191,6 +269,6 @@ The shaded JAR at `target/kafka-connect-ais-0.1.0-SNAPSHOT.jar` contains AisLib 
 
 == Credits
 
-Built with https://claude.ai/[Claude Code] using the https://github.com/rmoff/claude-code-skill-kafka-connect[kafka-connect Claude Code skill].
+Directed by @rmoff, built with https://claude.ai/[Claude Code] using the `kafka-connect` Claude Code skill from @rmoff.
 
 AIS message decoding by https://github.com/dma-ais/AisLib[AisLib] (Danish Maritime Authority, Apache 2.0 license).
