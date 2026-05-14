@@ -164,6 +164,95 @@ Check the registered Avro schemas:
 curl -s http://localhost:8081/subjects | jq .
 ----
 
+== Deploy to Confluent Cloud Custom Connectors
+
+The same shaded JAR runs as a https://docs.confluent.io/cloud/current/connectors/bring-your-connector/custom-connector-fm-qs.html[Confluent Cloud Custom Connector] (CCAF). The flow is: build the JAR, upload it as a plugin, then create the connector against your CC cluster.
+
+You'll need the https://docs.confluent.io/confluent-cli/current/overview.html[`confluent` CLI] logged into your environment.
+
+Build the JAR (same as the local path):
+
+[source,bash]
+----
+mvn clean package -DskipTests
+----
+
+Upload as a CC Custom Connector plugin (returns a `ccp-XXXXXX` plugin ID, keep it):
+
+[source,bash]
+----
+confluent connect custom-plugin create kafka-connect-ais \
+  --plugin-file target/kafka-connect-ais-0.1.0-SNAPSHOT.jar \
+  --connector-class net.rmoff.connect.ais.AisSourceConnector \
+  --connector-type source \
+  --cloud aws
+----
+
+Pre-create the destination Kafka topic (CC Standard clusters do not auto-create):
+
+[source,bash]
+----
+confluent kafka topic create ais --partitions 6 \
+  --cluster <lkc-...> --environment <env-...>
+----
+
+Edit `connector-ais-ccloud.json` (provided in this repo) and fill in the placeholders:
+
+* `confluent.custom.plugin.id` -- the `ccp-XXXXXX` from the upload step
+* `confluent.custom.connection.endpoints` -- the AIS source IP **and** your Schema Registry FQDN, both in the egress allowlist (see below)
+* `kafka.api.key` / `kafka.api.secret` -- a CC Kafka API key/secret for the target cluster
+* `value.converter.schema.registry.url` and `value.converter.basic.auth.user.info` -- your SR endpoint and an SR API key/secret
+
+Create the connector:
+
+[source,bash]
+----
+confluent connect cluster create \
+  --config-file connector-ais-ccloud.json \
+  --cluster <lkc-...> --environment <env-...>
+----
+
+=== CCAF-specific config fields you will not guess
+
+These are required for any Custom Connector and have no equivalent in self-managed Kafka Connect, so they're not in the `Configuration` table further down. The `connector-ais-ccloud.json` template includes them all:
+
+* `confluent.connector.type=CUSTOM` -- marks this as a Custom Connector deployment
+* `confluent.custom.plugin.id=<ccp-XXXXXX>` -- the plugin ID returned by `confluent connect custom-plugin create`
+* `confluent.custom.connection.endpoints=<host:port:PROTO>;...` -- egress allowlist (see next section)
+
+=== Egress: AIS source IP AND Schema Registry both need allowlisting
+
+A CCAF Custom Connector runs in a sandbox with no outbound network access by default. Every host it needs to reach must appear in `confluent.custom.connection.endpoints`, including ones inside your own Confluent Cloud environment.
+
+In practice that means **two** entries for the default Avro-to-SR setup:
+
+[source]
+----
+confluent.custom.connection.endpoints=\
+  153.44.253.27:5631:TCP;\
+  <psrc-XXXXXX>.<region>.<cloud>.confluent.cloud:443:TCP
+----
+
+Two things worth knowing:
+
+* CC docs say egress endpoints must be FQDN, but for the Norwegian Coastal Administration's AIS feed only an IP literal is published (no PTR / forward DNS). The IP literal **is** accepted by the CC control plane and the egress is honored.
+* `confluent.custom.schema.registry.auto=TRUE` does **not** allowlist your Schema Registry egress automatically. SR has to be added explicitly. Symptom when it's missing is a `SocketTimeoutException` against the `psrc-...` URL in the app-logs topic.
+
+=== Debugging failed deploys: read the app-logs topic
+
+The user-facing failure surface of a Custom Connector is minimal -- `confluent connect cluster list` will show `FAILED` with a generic "review the connector's common logs in the Kafka topic `clcc-XXXXXX-app-logs` to debug the issue" message. That topic is the only useful signal.
+
+To see what actually went wrong, consume from `<connector-id>-app-logs` (it's created in your own cluster, on first connector launch) and filter by `level=ERROR`. The interesting payload is usually in the structured `exception.stacktrace` field of the log JSON, not the `message` field. Example with kcat:
+
+[source,bash]
+----
+kcat -b <bootstrap> -X security.protocol=SASL_SSL \
+     -X sasl.mechanisms=PLAIN \
+     -X sasl.username=<key> -X sasl.password=<secret> \
+     -t clcc-XXXXXX-app-logs -C -o end -q | \
+  jq -r 'select(.level=="ERROR") | "\(.timestamp)\n\(.message)\n\(.exception.stacktrace // "")\n---"'
+----
+
 == Configuration
 
 [cols="1,1,1,3"]
