@@ -56,7 +56,7 @@ Create the connector:
 
 [source,bash]
 ----
-kcctl apply -f connector-ais.json
+kcctl apply -f configs/connector-ais.json
 ----
 
 Check it's running:
@@ -95,14 +95,14 @@ docker compose down
 
 === Per-type topics
 
-Instead of a single topic, you can split messages into separate topics by category. Use `connector-ais-per-type.json`:
+Instead of a single topic, you can split messages into separate topics by category. Use `configs/connector-ais-per-type.json`:
 
 [source,bash]
 ----
-kcctl apply -f connector-ais-per-type.json
+kcctl apply -f configs/connector-ais-per-type.json
 ----
 
-This creates separate topics:
+This produces records on separate topics:
 
 * `ais.position` -- vessel position reports (types 1, 2, 3, 9, 18, 19, 27)
 * `ais.static` -- vessel identity and voyage data (types 5, 24)
@@ -111,6 +111,8 @@ This creates separate topics:
 * `ais.safety` -- safety messages (types 12, 14)
 * `ais.binary` -- application-specific binary (types 6, 8, 25, 26)
 * `ais.other` -- control/management (everything else)
+
+NOTE: The connector does **not** create these topics. On a cluster with auto-create enabled (the default in the bundled `docker-compose.yml`) they'll appear on first write, but on clusters where auto-create is off -- including all Confluent Cloud clusters -- you have to create each per-type topic up front, otherwise the producer will fail with `UNKNOWN_TOPIC_OR_PARTITION`.
 
 === Working with the data
 
@@ -162,6 +164,130 @@ Check the registered Avro schemas:
 [source,bash]
 ----
 curl -s http://localhost:8081/subjects | jq .
+----
+
+== Deploy to Confluent Cloud Custom Connectors
+
+The same shaded JAR runs as a https://docs.confluent.io/cloud/current/connectors/bring-your-connector/overview.html#install-custom-connectors-for-ccloud[Custom Connector for Confluent Cloud]. The flow is: build the JAR, upload it as a plugin, then create the connector against your CC cluster.
+
+You'll need the https://docs.confluent.io/confluent-cli/current/overview.html[`confluent` CLI] logged into your environment.
+
+Build the JAR (same as the local path):
+
+[source,bash]
+----
+mvn clean package -DskipTests
+----
+
+Upload as a CC Custom Connector plugin (returns a `ccp-XXXXXX` plugin ID, keep it):
+
+[source,bash]
+----
+confluent connect custom-plugin create kafka-connect-ais \
+  --plugin-file target/kafka-connect-ais-0.1.0-SNAPSHOT.jar \
+  --connector-class net.rmoff.connect.ais.AisSourceConnector \
+  --connector-type source \
+  --cloud aws
+----
+
+Pre-create the destination Kafka topic (CC Standard clusters do not auto-create):
+
+[source,bash]
+----
+confluent kafka topic create ais --partitions 6 \
+  --cluster <lkc-...> --environment <env-...>
+----
+
+If you're using the per-type variant (`configs/confluent-cloud/connector-ais-per-type.json`), pre-create **all** of them up front -- the connector will not create them itself:
+
+[source,bash]
+----
+for t in ais.position ais.static ais.base_station ais.aton \
+         ais.safety ais.binary ais.other; do
+  confluent kafka topic create "$t" --partitions 6 \
+    --cluster <lkc-...> --environment <env-...>
+done
+----
+
+Edit `configs/confluent-cloud/connector-ais.json` (provided in this repo) and fill in the placeholders:
+
+* `confluent.custom.plugin.id` -- the `ccp-XXXXXX` from the upload step
+* `confluent.custom.connection.endpoints` -- the AIS source IP **and** your Schema Registry FQDN, both in the egress allowlist (see below)
+* `kafka.api.key` / `kafka.api.secret` -- a CC Kafka API key/secret for the target cluster
+* `value.converter.schema.registry.url` and `value.converter.basic.auth.user.info` -- your SR endpoint and an SR API key/secret
+
+Create the connector:
+
+[source,bash]
+----
+confluent connect cluster create \
+  --config-file configs/confluent-cloud/connector-ais.json \
+  --cluster <lkc-...> --environment <env-...>
+----
+
+=== Custom Connector-specific config fields you will not guess
+
+These are required for any Custom Connector and have no equivalent in self-managed Kafka Connect, so they're not in the `Configuration` table further down. The `configs/confluent-cloud/connector-ais.json` template includes them all:
+
+* `confluent.connector.type=CUSTOM` -- marks this as a Custom Connector deployment
+* `confluent.custom.plugin.id=<ccp-XXXXXX>` -- the plugin ID returned by `confluent connect custom-plugin create`
+* `confluent.custom.connection.endpoints=<host:port:PROTO>;...` -- egress allowlist (see next section)
+
+=== Egress: AIS source IP AND Schema Registry both need allowlisting
+
+A Custom Connector for Confluent Cloud runs in a sandbox with no outbound network access by default. Every host it needs to reach must appear in `confluent.custom.connection.endpoints`, including ones inside your own Confluent Cloud environment.
+
+In practice that means **two** entries for the default Avro-to-SR setup:
+
+[source]
+----
+confluent.custom.connection.endpoints=\
+  153.44.253.27:5631:TCP;\
+  <psrc-XXXXXX>.<region>.<cloud>.confluent.cloud:443:TCP
+----
+
+Two things worth knowing:
+
+* CC docs say egress endpoints must be FQDN, but for the Norwegian Coastal Administration's AIS feed only an IP literal is published (no PTR / forward DNS). The IP literal **is** accepted by the CC control plane and the egress is honored.
+* `confluent.custom.schema.registry.auto=TRUE` does **not** allowlist your Schema Registry egress automatically. SR has to be added explicitly. Symptom when it's missing is a `SocketTimeoutException` against the `psrc-...` URL in the app-logs topic.
+
+=== Schema Registry: configure explicitly, don't rely on `schema.registry.auto`
+
+The default value path of this connector is Avro to a Schema Registry, so the connector config needs SR credentials directly:
+
+[source]
+----
+value.converter=io.confluent.connect.avro.AvroConverter
+value.converter.schema.registry.url=https://<psrc-XXXXXX>.<region>.<cloud>.confluent.cloud
+value.converter.basic.auth.credentials.source=USER_INFO
+value.converter.basic.auth.user.info=<SR_KEY>:<SR_SECRET>
+----
+
+CC docs suggest setting `confluent.custom.schema.registry.auto=TRUE` to inject these automatically. In our testing that flag did **not** wire up `value.converter.schema.registry.url` for `AvroConverter`, and the connector failed on startup with `ConfigException: Missing required configuration "schema.registry.url"`. Setting all four properties explicitly (as in the template) is the reliable path.
+
+If you don't want Avro/SR at all, swap the value converter and drop the SR config:
+
+[source]
+----
+value.converter=org.apache.kafka.connect.json.JsonConverter
+value.converter.schemas.enable=false
+----
+
+You can then also remove the Schema Registry FQDN from `confluent.custom.connection.endpoints`.
+
+=== Debugging failed deploys: read the app-logs topic
+
+The user-facing failure surface of a Custom Connector is minimal -- `confluent connect cluster list` will show `FAILED` with a generic "review the connector's common logs in the Kafka topic `clcc-XXXXXX-app-logs` to debug the issue" message. That topic is the only useful signal.
+
+To see what actually went wrong, consume from `<connector-id>-app-logs` (it's created in your own cluster, on first connector launch) and filter by `level=ERROR`. The interesting payload is usually in the structured `exception.stacktrace` field of the log JSON, not the `message` field. Example with kcat:
+
+[source,bash]
+----
+kcat -b <bootstrap> -X security.protocol=SASL_SSL \
+     -X sasl.mechanisms=PLAIN \
+     -X sasl.username=<key> -X sasl.password=<secret> \
+     -t clcc-XXXXXX-app-logs -C -o end -q | \
+  jq -r 'select(.level=="ERROR") | "\(.timestamp)\n\(.message)\n\(.exception.stacktrace // "")\n---"'
 ----
 
 == Configuration
@@ -236,6 +362,28 @@ Invalid sentinel values (latitude 91.0, longitude 181.0, heading 511, etc.) are 
 
 The Avro schema is registered automatically in Schema Registry. You can inspect it at http://localhost:8081/subjects/ais-value/versions/latest.
 
+=== Subjects registered in Schema Registry
+
+With the default `TopicNameStrategy`, the subject names follow the topic names:
+
+In single-topic mode (`topic.per.type=false`, default), one subject is registered:
+
+* `ais-value` -- Avro record `net.rmoff.connect.ais.AisValue`, the flat schema containing every field across all message types
+
+In per-type mode (`topic.per.type=true`), one subject per category is registered, each with its own narrower Avro record:
+
+* `ais.position-value` -- `Position`
+* `ais.static-value` -- `Static`
+* `ais.base_station-value` -- `BaseStation`
+* `ais.safety-value` -- `Safety`
+* `ais.aton-value` -- `AtoN`
+* `ais.binary-value` -- `Binary`
+* `ais.other-value` -- `Other`
+
+(Replace `ais` with whatever prefix you've set in the `topic` config.)
+
+Records also have a key (the INT32 MMSI). Whether a `*-key` subject is registered depends on which key converter your worker / connector config uses: the local `docker-compose.yml` here configures `AvroConverter` for keys (so you'll also see `ais-key` etc.), whereas the supplied Confluent Cloud templates use `StringConverter` for keys (so no key subjects are registered).
+
 == Headers
 
 Every record carries these Kafka headers for routing/filtering without deserialization:
@@ -260,6 +408,8 @@ This is a TCP stream source connector, which is a bit different from the typical
 * `SO_TIMEOUT` on the socket prevents `poll()` from blocking forever on a stalled connection
 * `stop()` closes the socket from a different thread, which unblocks any pending read
 
+The connector declares `ExactlyOnceSupport.SUPPORTED`. AIS NMEA sentences are independently parseable and MMSI-keyed, the per-poll transaction boundary is safe, and each task tracks a `{connection_epoch, message_count}` offset per host. Practically this means "no duplicate writes within a connection" -- not end-to-end exactly-once, because the upstream TCP feed itself has no replay (messages during a connector outage are simply lost).
+
 AIS message decoding is handled by https://github.com/dma-ais/AisLib[AisLib] from the Danish Maritime Authority.
 
 == Building
@@ -271,7 +421,10 @@ Requires Java 11+ and Maven.
 mvn clean package
 ----
 
-The shaded JAR at `target/kafka-connect-ais-0.1.0-SNAPSHOT.jar` contains AisLib and its dependencies. Drop it into your Connect worker's `plugin.path` directory.
+The build produces two usable artifacts:
+
+* `target/kafka-connect-ais-0.1.0-SNAPSHOT.jar` -- the shaded fat JAR. Drop it into a Connect worker's `plugin.path` directory, or upload it to Confluent Cloud via `confluent connect custom-plugin create`.
+* `target/components/packages/rmoff-kafka-connect-ais-0.1.0-SNAPSHOT.zip` -- a Confluent component archive with a `manifest.json` (produced by the `kafka-connect-maven-plugin`). This is the canonical https://www.confluent.io/hub/[Confluent Hub] / Marketplace format and is also accepted by `confluent connect custom-plugin create --plugin-file ...`.
 
 == Credits
 

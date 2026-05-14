@@ -17,9 +17,20 @@
         <java.version>11</java.version>
         <kafka.version>3.7.0</kafka.version>
         <aislib.version>2.8.5</aislib.version>
+        <commons.lang3.version>3.18.0</commons.lang3.version>
         <junit.version>5.10.1</junit.version>
         <mockito.version>5.8.0</mockito.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>${commons.lang3.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -32,6 +43,20 @@
             <groupId>dk.dma.ais.lib</groupId>
             <artifactId>ais-lib-messages</artifactId>
             <version>${aislib.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -52,6 +77,13 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <pluginRepositories>
+        <pluginRepository>
+            <id>confluent</id>
+            <url>https://packages.confluent.io/maven/</url>
+        </pluginRepository>
+    </pluginRepositories>
 
     <build>
         <plugins>
@@ -99,6 +131,63 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.3</version>
+            </plugin>
+            <plugin>
+                <groupId>io.confluent</groupId>
+                <artifactId>kafka-connect-maven-plugin</artifactId>
+                <version>0.12.0</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>kafka-connect</goal>
+                        </goals>
+                        <configuration>
+                            <ownerUsername>rmoff</ownerUsername>
+                            <ownerType>user</ownerType>
+                            <ownerName>rmoff</ownerName>
+                            <ownerUrl>https://github.com/rmoff</ownerUrl>
+
+                            <componentTypes>
+                                <componentType>source</componentType>
+                            </componentTypes>
+
+                            <tags>
+                                <tag>ais</tag>
+                                <tag>maritime</tag>
+                                <tag>nmea</tag>
+                                <tag>tcp</tag>
+                                <tag>vessel</tag>
+                                <tag>iot</tag>
+                            </tags>
+
+                            <requirements>
+                                <requirement>Kafka Connect 3.0 or above</requirement>
+                                <requirement>Java 11 or above</requirement>
+                            </requirements>
+
+                            <deliveryGuarantee>
+                                <deliveryGuarantee>exactlyOnce</deliveryGuarantee>
+                            </deliveryGuarantee>
+
+                            <title>AIS Source Connector</title>
+                            <description>Ingests live AIS (Automatic Identification System) maritime data over TCP and produces structured Avro records to Kafka. Decodes all 28 AIS message types, keys records by MMSI, optionally routes per message-type to separate topics, and supports exactly-once delivery within a TCP connection.</description>
+
+                            <sourceUrl>https://github.com/rmoff/kafka-connect-ais</sourceUrl>
+                            <documentationUrl>https://github.com/rmoff/kafka-connect-ais#readme</documentationUrl>
+
+                            <supportProviderName>Open Source Community</supportProviderName>
+                            <supportSummary>This is a proof-of-concept connector. Best-effort community support via GitHub issues.</supportSummary>
+                            <supportUrl>https://github.com/rmoff/kafka-connect-ais/issues</supportUrl>
+
+                            <licenses>
+                                <license>
+                                    <name>Apache License 2.0</name>
+                                    <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+                                </license>
+                            </licenses>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
