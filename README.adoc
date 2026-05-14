@@ -360,7 +360,10 @@ Requires Java 11+ and Maven.
 mvn clean package
 ----
 
-The shaded JAR at `target/kafka-connect-ais-0.1.0-SNAPSHOT.jar` contains AisLib and its dependencies. Drop it into your Connect worker's `plugin.path` directory.
+The build produces two usable artifacts:
+
+* `target/kafka-connect-ais-0.1.0-SNAPSHOT.jar` -- the shaded fat JAR. Drop it into a Connect worker's `plugin.path` directory, or upload it to Confluent Cloud via `confluent connect custom-plugin create`.
+* `target/components/packages/rmoff-kafka-connect-ais-0.1.0-SNAPSHOT.zip` -- a Confluent component archive with a `manifest.json` (produced by the `kafka-connect-maven-plugin`). This is the canonical https://www.confluent.io/hub/[Confluent Hub] / Marketplace format and is also accepted by `confluent connect custom-plugin create --plugin-file ...`.
 
 == Credits
 
