@@ -7,7 +7,7 @@
 docker compose up -d
 until curl -sf http://localhost:8083/ >/dev/null; do sleep 2; done
 curl -X POST -H 'Content-Type: application/json' \
-    --data @connector-ais.json http://localhost:8083/connectors
+    --data @configs/connector-ais.json http://localhost:8083/connectors
 sleep 30  # connector needs ~5s + record flow time
 docker exec broker /opt/kafka/bin/kafka-get-offsets.sh \
     --bootstrap-server broker:29092 --topic ais
@@ -24,5 +24,6 @@ trivy rootfs --scanners vuln \
 
 ## Gotchas already in README
 See README "Deploy to Confluent Cloud Custom Connectors" for the
-CCAF deployment gotchas (egress allowlist, schema.registry.auto
-bug, app-logs as failure surface).
+Custom Connector deployment gotchas (egress allowlist applies to
+Schema Registry too, schema.registry.auto=TRUE doesn't wire SR for
+AvroConverter, app-logs topic is the only useful failure surface).

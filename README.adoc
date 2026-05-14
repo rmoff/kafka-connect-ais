@@ -56,7 +56,7 @@ Create the connector:
 
 [source,bash]
 ----
-kcctl apply -f connector-ais.json
+kcctl apply -f configs/connector-ais.json
 ----
 
 Check it's running:
@@ -95,11 +95,11 @@ docker compose down
 
 === Per-type topics
 
-Instead of a single topic, you can split messages into separate topics by category. Use `connector-ais-per-type.json`:
+Instead of a single topic, you can split messages into separate topics by category. Use `configs/connector-ais-per-type.json`:
 
 [source,bash]
 ----
-kcctl apply -f connector-ais-per-type.json
+kcctl apply -f configs/connector-ais-per-type.json
 ----
 
 This produces records on separate topics:
@@ -168,7 +168,7 @@ curl -s http://localhost:8081/subjects | jq .
 
 == Deploy to Confluent Cloud Custom Connectors
 
-The same shaded JAR runs as a https://docs.confluent.io/cloud/current/connectors/bring-your-connector/custom-connector-fm-qs.html[Confluent Cloud Custom Connector] (CCAF). The flow is: build the JAR, upload it as a plugin, then create the connector against your CC cluster.
+The same shaded JAR runs as a https://docs.confluent.io/cloud/current/connectors/bring-your-connector/overview.html#install-custom-connectors-for-ccloud[Custom Connector for Confluent Cloud]. The flow is: build the JAR, upload it as a plugin, then create the connector against your CC cluster.
 
 You'll need the https://docs.confluent.io/confluent-cli/current/overview.html[`confluent` CLI] logged into your environment.
 
@@ -198,7 +198,7 @@ confluent kafka topic create ais --partitions 6 \
   --cluster <lkc-...> --environment <env-...>
 ----
 
-If you're using the per-type variant (`connector-ais-ccloud-per-type.json`), pre-create **all** of them up front -- the connector will not create them itself:
+If you're using the per-type variant (`configs/confluent-cloud/connector-ais-per-type.json`), pre-create **all** of them up front -- the connector will not create them itself:
 
 [source,bash]
 ----
@@ -209,7 +209,7 @@ for t in ais.position ais.static ais.base_station ais.aton \
 done
 ----
 
-Edit `connector-ais-ccloud.json` (provided in this repo) and fill in the placeholders:
+Edit `configs/confluent-cloud/connector-ais.json` (provided in this repo) and fill in the placeholders:
 
 * `confluent.custom.plugin.id` -- the `ccp-XXXXXX` from the upload step
 * `confluent.custom.connection.endpoints` -- the AIS source IP **and** your Schema Registry FQDN, both in the egress allowlist (see below)
@@ -221,13 +221,13 @@ Create the connector:
 [source,bash]
 ----
 confluent connect cluster create \
-  --config-file connector-ais-ccloud.json \
+  --config-file configs/confluent-cloud/connector-ais.json \
   --cluster <lkc-...> --environment <env-...>
 ----
 
-=== CCAF-specific config fields you will not guess
+=== Custom Connector-specific config fields you will not guess
 
-These are required for any Custom Connector and have no equivalent in self-managed Kafka Connect, so they're not in the `Configuration` table further down. The `connector-ais-ccloud.json` template includes them all:
+These are required for any Custom Connector and have no equivalent in self-managed Kafka Connect, so they're not in the `Configuration` table further down. The `configs/confluent-cloud/connector-ais.json` template includes them all:
 
 * `confluent.connector.type=CUSTOM` -- marks this as a Custom Connector deployment
 * `confluent.custom.plugin.id=<ccp-XXXXXX>` -- the plugin ID returned by `confluent connect custom-plugin create`
@@ -235,7 +235,7 @@ These are required for any Custom Connector and have no equivalent in self-manag
 
 === Egress: AIS source IP AND Schema Registry both need allowlisting
 
-A CCAF Custom Connector runs in a sandbox with no outbound network access by default. Every host it needs to reach must appear in `confluent.custom.connection.endpoints`, including ones inside your own Confluent Cloud environment.
+A Custom Connector for Confluent Cloud runs in a sandbox with no outbound network access by default. Every host it needs to reach must appear in `confluent.custom.connection.endpoints`, including ones inside your own Confluent Cloud environment.
 
 In practice that means **two** entries for the default Avro-to-SR setup:
 
@@ -382,7 +382,7 @@ In per-type mode (`topic.per.type=true`), one subject per category is registered
 
 (Replace `ais` with whatever prefix you've set in the `topic` config.)
 
-Records also have a key (the INT32 MMSI). Whether a `*-key` subject is registered depends on which key converter your worker / connector config uses: the local `docker-compose.yml` here configures `AvroConverter` for keys (so you'll also see `ais-key` etc.), whereas the supplied CCAF templates use `StringConverter` for keys (so no key subjects are registered).
+Records also have a key (the INT32 MMSI). Whether a `*-key` subject is registered depends on which key converter your worker / connector config uses: the local `docker-compose.yml` here configures `AvroConverter` for keys (so you'll also see `ais-key` etc.), whereas the supplied Confluent Cloud templates use `StringConverter` for keys (so no key subjects are registered).
 
 == Headers
 
