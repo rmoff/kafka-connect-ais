@@ -2,6 +2,7 @@ package net.rmoff.connect.ais;
 
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.Task;
+import org.apache.kafka.connect.source.ExactlyOnceSupport;
 import org.apache.kafka.connect.source.SourceConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,5 +61,13 @@ public class AisSourceConnector extends SourceConnector {
     @Override
     public ConfigDef config() {
         return AisSourceConnectorConfig.CONFIG_DEF;
+    }
+
+    // AIS NMEA sentences are independently parseable and MMSI-keyed; the per-poll
+    // transaction boundary is safe. The TCP feed has no replay, so EOS here means
+    // "no duplicates within a connection" rather than end-to-end exactly-once.
+    @Override
+    public ExactlyOnceSupport exactlyOnceSupport(Map<String, String> connectorConfig) {
+        return ExactlyOnceSupport.SUPPORTED;
     }
 }

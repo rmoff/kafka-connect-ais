@@ -349,6 +349,8 @@ This is a TCP stream source connector, which is a bit different from the typical
 * `SO_TIMEOUT` on the socket prevents `poll()` from blocking forever on a stalled connection
 * `stop()` closes the socket from a different thread, which unblocks any pending read
 
+The connector declares `ExactlyOnceSupport.SUPPORTED`. AIS NMEA sentences are independently parseable and MMSI-keyed, the per-poll transaction boundary is safe, and each task tracks a `{connection_epoch, message_count}` offset per host. Practically this means "no duplicate writes within a connection" -- not end-to-end exactly-once, because the upstream TCP feed itself has no replay (messages during a connector outage are simply lost).
+
 AIS message decoding is handled by https://github.com/dma-ais/AisLib[AisLib] from the Danish Maritime Authority.
 
 == Building
