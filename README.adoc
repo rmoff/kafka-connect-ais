@@ -102,7 +102,7 @@ Instead of a single topic, you can split messages into separate topics by catego
 kcctl apply -f connector-ais-per-type.json
 ----
 
-This creates separate topics:
+This produces records on separate topics:
 
 * `ais.position` -- vessel position reports (types 1, 2, 3, 9, 18, 19, 27)
 * `ais.static` -- vessel identity and voyage data (types 5, 24)
@@ -111,6 +111,8 @@ This creates separate topics:
 * `ais.safety` -- safety messages (types 12, 14)
 * `ais.binary` -- application-specific binary (types 6, 8, 25, 26)
 * `ais.other` -- control/management (everything else)
+
+NOTE: The connector does **not** create these topics. On a cluster with auto-create enabled (the default in the bundled `docker-compose.yml`) they'll appear on first write, but on clusters where auto-create is off -- including all Confluent Cloud clusters -- you have to create each per-type topic up front, otherwise the producer will fail with `UNKNOWN_TOPIC_OR_PARTITION`.
 
 === Working with the data
 
@@ -194,6 +196,17 @@ Pre-create the destination Kafka topic (CC Standard clusters do not auto-create)
 ----
 confluent kafka topic create ais --partitions 6 \
   --cluster <lkc-...> --environment <env-...>
+----
+
+If you're using the per-type variant (`connector-ais-ccloud-per-type.json`), pre-create **all** of them up front -- the connector will not create them itself:
+
+[source,bash]
+----
+for t in ais.position ais.static ais.base_station ais.aton \
+         ais.safety ais.binary ais.other; do
+  confluent kafka topic create "$t" --partitions 6 \
+    --cluster <lkc-...> --environment <env-...>
+done
 ----
 
 Edit `connector-ais-ccloud.json` (provided in this repo) and fill in the placeholders:
