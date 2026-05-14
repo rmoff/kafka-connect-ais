@@ -238,6 +238,30 @@ Two things worth knowing:
 * CC docs say egress endpoints must be FQDN, but for the Norwegian Coastal Administration's AIS feed only an IP literal is published (no PTR / forward DNS). The IP literal **is** accepted by the CC control plane and the egress is honored.
 * `confluent.custom.schema.registry.auto=TRUE` does **not** allowlist your Schema Registry egress automatically. SR has to be added explicitly. Symptom when it's missing is a `SocketTimeoutException` against the `psrc-...` URL in the app-logs topic.
 
+=== Schema Registry: configure explicitly, don't rely on `schema.registry.auto`
+
+The default value path of this connector is Avro to a Schema Registry, so the connector config needs SR credentials directly:
+
+[source]
+----
+value.converter=io.confluent.connect.avro.AvroConverter
+value.converter.schema.registry.url=https://<psrc-XXXXXX>.<region>.<cloud>.confluent.cloud
+value.converter.basic.auth.credentials.source=USER_INFO
+value.converter.basic.auth.user.info=<SR_KEY>:<SR_SECRET>
+----
+
+CC docs suggest setting `confluent.custom.schema.registry.auto=TRUE` to inject these automatically. In our testing that flag did **not** wire up `value.converter.schema.registry.url` for `AvroConverter`, and the connector failed on startup with `ConfigException: Missing required configuration "schema.registry.url"`. Setting all four properties explicitly (as in the template) is the reliable path.
+
+If you don't want Avro/SR at all, swap the value converter and drop the SR config:
+
+[source]
+----
+value.converter=org.apache.kafka.connect.json.JsonConverter
+value.converter.schemas.enable=false
+----
+
+You can then also remove the Schema Registry FQDN from `confluent.custom.connection.endpoints`.
+
 === Debugging failed deploys: read the app-logs topic
 
 The user-facing failure surface of a Custom Connector is minimal -- `confluent connect cluster list` will show `FAILED` with a generic "review the connector's common logs in the Kafka topic `clcc-XXXXXX-app-logs` to debug the issue" message. That topic is the only useful signal.
