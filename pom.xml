@@ -118,12 +118,48 @@
                         </goals>
                         <configuration>
                             <ownerUsername>rmoff</ownerUsername>
+                            <ownerType>user</ownerType>
+                            <ownerName>rmoff</ownerName>
+                            <ownerUrl>https://github.com/rmoff</ownerUrl>
+
                             <componentTypes>
                                 <componentType>source</componentType>
                             </componentTypes>
+
+                            <tags>
+                                <tag>ais</tag>
+                                <tag>maritime</tag>
+                                <tag>nmea</tag>
+                                <tag>tcp</tag>
+                                <tag>vessel</tag>
+                                <tag>iot</tag>
+                            </tags>
+
+                            <requirements>
+                                <requirement>Kafka Connect 3.0 or above</requirement>
+                                <requirement>Java 11 or above</requirement>
+                            </requirements>
+
+                            <deliveryGuarantee>
+                                <deliveryGuarantee>exactlyOnce</deliveryGuarantee>
+                            </deliveryGuarantee>
+
                             <title>AIS Source Connector</title>
-                            <description>Ingests live AIS (Automatic Identification System) maritime data over TCP and produces structured Avro records to Kafka.</description>
+                            <description>Ingests live AIS (Automatic Identification System) maritime data over TCP and produces structured Avro records to Kafka. Decodes all 28 AIS message types, keys records by MMSI, optionally routes per message-type to separate topics, and supports exactly-once delivery within a TCP connection.</description>
+
                             <sourceUrl>https://github.com/rmoff/kafka-connect-ais</sourceUrl>
+                            <documentationUrl>https://github.com/rmoff/kafka-connect-ais#readme</documentationUrl>
+
+                            <supportProviderName>Open Source Community</supportProviderName>
+                            <supportSummary>This is a proof-of-concept connector. Best-effort community support via GitHub issues.</supportSummary>
+                            <supportUrl>https://github.com/rmoff/kafka-connect-ais/issues</supportUrl>
+
+                            <licenses>
+                                <license>
+                                    <name>Apache License 2.0</name>
+                                    <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+                                </license>
+                            </licenses>
                         </configuration>
                     </execution>
                 </executions>
