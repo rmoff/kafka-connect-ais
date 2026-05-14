@@ -349,6 +349,28 @@ Invalid sentinel values (latitude 91.0, longitude 181.0, heading 511, etc.) are 
 
 The Avro schema is registered automatically in Schema Registry. You can inspect it at http://localhost:8081/subjects/ais-value/versions/latest.
 
+=== Subjects registered in Schema Registry
+
+With the default `TopicNameStrategy`, the subject names follow the topic names:
+
+In single-topic mode (`topic.per.type=false`, default), one subject is registered:
+
+* `ais-value` -- Avro record `net.rmoff.connect.ais.AisValue`, the flat schema containing every field across all message types
+
+In per-type mode (`topic.per.type=true`), one subject per category is registered, each with its own narrower Avro record:
+
+* `ais.position-value` -- `Position`
+* `ais.static-value` -- `Static`
+* `ais.base_station-value` -- `BaseStation`
+* `ais.safety-value` -- `Safety`
+* `ais.aton-value` -- `AtoN`
+* `ais.binary-value` -- `Binary`
+* `ais.other-value` -- `Other`
+
+(Replace `ais` with whatever prefix you've set in the `topic` config.)
+
+Records also have a key (the INT32 MMSI). Whether a `*-key` subject is registered depends on which key converter your worker / connector config uses: the local `docker-compose.yml` here configures `AvroConverter` for keys (so you'll also see `ais-key` etc.), whereas the supplied CCAF templates use `StringConverter` for keys (so no key subjects are registered).
+
 == Headers
 
 Every record carries these Kafka headers for routing/filtering without deserialization:
