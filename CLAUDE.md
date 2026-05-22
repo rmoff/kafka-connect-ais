@@ -24,6 +24,8 @@ trivy rootfs --scanners vuln \
 
 ## Gotchas already in README
 See README "Deploy to Confluent Cloud Custom Connectors" for the
-Custom Connector deployment gotchas (egress allowlist applies to
-Schema Registry too, schema.registry.auto=TRUE doesn't wire SR for
-AvroConverter, app-logs topic is the only useful failure surface).
+Custom Connector deployment gotchas (schema.registry.auto is
+case-sensitive -- lowercase `"true"` works, `"TRUE"` is silently
+ignored; with auto-mode on do not also set the explicit
+value.converter.schema.registry.* fields; app-logs topic is the
+only useful failure surface).

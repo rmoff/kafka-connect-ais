@@ -212,9 +212,10 @@ done
 Edit `configs/confluent-cloud/connector-ais.json` (provided in this repo) and fill in the placeholders:
 
 * `confluent.custom.plugin.id` -- the `ccp-XXXXXX` from the upload step
-* `confluent.custom.connection.endpoints` -- the AIS source IP **and** your Schema Registry FQDN, both in the egress allowlist (see below)
+* `confluent.custom.connection.endpoints` -- the AIS source endpoint (see "Egress" below)
 * `kafka.api.key` / `kafka.api.secret` -- a CC Kafka API key/secret for the target cluster
-* `value.converter.schema.registry.url` and `value.converter.basic.auth.user.info` -- your SR endpoint and an SR API key/secret
+
+The Schema Registry URL, credentials, and SR egress are all injected automatically by `confluent.custom.schema.registry.auto=true` -- see "Schema Registry" below.
 
 Create the connector:
 
@@ -233,37 +234,48 @@ These are required for any Custom Connector and have no equivalent in self-manag
 * `confluent.custom.plugin.id=<ccp-XXXXXX>` -- the plugin ID returned by `confluent connect custom-plugin create`
 * `confluent.custom.connection.endpoints=<host:port:PROTO>;...` -- egress allowlist (see next section)
 
-=== Egress: AIS source IP AND Schema Registry both need allowlisting
+=== Egress: only the AIS source endpoint
 
-A Custom Connector for Confluent Cloud runs in a sandbox with no outbound network access by default. Every host it needs to reach must appear in `confluent.custom.connection.endpoints`, including ones inside your own Confluent Cloud environment.
+A Custom Connector for Confluent Cloud runs in a sandbox with no outbound network access by default. Every host it needs to reach must appear in `confluent.custom.connection.endpoints`.
 
-In practice that means **two** entries for the default Avro-to-SR setup:
+For this connector, that's just the AIS source:
+
+[source]
+----
+confluent.custom.connection.endpoints=153.44.253.27:5631:TCP
+----
+
+The Schema Registry egress is added to the allowlist for you by `confluent.custom.schema.registry.auto=true` (see next section) -- you do **not** need to list the `psrc-...` FQDN here.
+
+CC docs say egress endpoints must be FQDN, but for the Norwegian Coastal Administration's AIS feed only an IP literal is published (no PTR / forward DNS). The IP literal **is** accepted by the CC control plane and the egress is honored.
+
+=== Schema Registry: let `schema.registry.auto` wire it up (lowercase `true`)
+
+The default value path of this connector is Avro to a Schema Registry. The shipped template uses Confluent Cloud's auto-mode:
+
+[source]
+----
+confluent.custom.schema.registry.auto=true
+value.converter=io.confluent.connect.avro.AvroConverter
+----
+
+The platform injects the SR URL, credentials, and SR egress allowlist entry for you. Do **not** also set `value.converter.schema.registry.url`, `value.converter.basic.auth.credentials.source`, or `value.converter.basic.auth.user.info` -- auto-mode rejects them with `Unsupported connector config(s) with schema registry auto mode enabled`.
+
+CAUTION: The value is **case-sensitive**. Use lowercase `"true"`. `"TRUE"` (which is what some Confluent docs examples show) is silently ignored -- the connector reaches RUNNING but fails on startup with `ConfigException: Missing required configuration "schema.registry.url"` because no SR config gets injected.
+
+If you'd rather wire SR manually (e.g. to use a non-default SR API key), omit `confluent.custom.schema.registry.auto` and set all four fields yourself, **and** add the SR FQDN to `confluent.custom.connection.endpoints`:
 
 [source]
 ----
 confluent.custom.connection.endpoints=\
   153.44.253.27:5631:TCP;\
   <psrc-XXXXXX>.<region>.<cloud>.confluent.cloud:443:TCP
-----
 
-Two things worth knowing:
-
-* CC docs say egress endpoints must be FQDN, but for the Norwegian Coastal Administration's AIS feed only an IP literal is published (no PTR / forward DNS). The IP literal **is** accepted by the CC control plane and the egress is honored.
-* `confluent.custom.schema.registry.auto=TRUE` does **not** allowlist your Schema Registry egress automatically. SR has to be added explicitly. Symptom when it's missing is a `SocketTimeoutException` against the `psrc-...` URL in the app-logs topic.
-
-=== Schema Registry: configure explicitly, don't rely on `schema.registry.auto`
-
-The default value path of this connector is Avro to a Schema Registry, so the connector config needs SR credentials directly:
-
-[source]
-----
 value.converter=io.confluent.connect.avro.AvroConverter
 value.converter.schema.registry.url=https://<psrc-XXXXXX>.<region>.<cloud>.confluent.cloud
 value.converter.basic.auth.credentials.source=USER_INFO
 value.converter.basic.auth.user.info=<SR_KEY>:<SR_SECRET>
 ----
-
-CC docs suggest setting `confluent.custom.schema.registry.auto=TRUE` to inject these automatically. In our testing that flag did **not** wire up `value.converter.schema.registry.url` for `AvroConverter`, and the connector failed on startup with `ConfigException: Missing required configuration "schema.registry.url"`. Setting all four properties explicitly (as in the template) is the reliable path.
 
 If you don't want Avro/SR at all, swap the value converter and drop the SR config:
 
@@ -272,8 +284,6 @@ If you don't want Avro/SR at all, swap the value converter and drop the SR confi
 value.converter=org.apache.kafka.connect.json.JsonConverter
 value.converter.schemas.enable=false
 ----
-
-You can then also remove the Schema Registry FQDN from `confluent.custom.connection.endpoints`.
 
 === Debugging failed deploys: read the app-logs topic
 
