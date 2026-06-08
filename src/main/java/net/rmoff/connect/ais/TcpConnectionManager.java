@@ -27,6 +27,7 @@ public class TcpConnectionManager {
     private long currentBackoffMs;
     private long nextReconnectTime;
     private volatile boolean stopping;
+    private volatile long lastDataReceivedAtMs;
 
     public TcpConnectionManager(String host, int port, long initialBackoffMs, long maxBackoffMs) {
         this.host = host;
@@ -42,9 +43,11 @@ public class TcpConnectionManager {
         socket = new Socket();
         socket.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
         socket.setSoTimeout(SO_TIMEOUT_MS);
+        socket.setKeepAlive(true);
         reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
         currentBackoffMs = initialBackoffMs;
         nextReconnectTime = 0;
+        lastDataReceivedAtMs = System.currentTimeMillis();
         log.info("Connected to AIS endpoint {}:{}", host, port);
     }
 
@@ -56,11 +59,30 @@ public class TcpConnectionManager {
      * @throws IOException on connection error
      */
     public String readLine() throws IOException {
-        return reader.readLine();
+        String line = reader.readLine();
+        if (line != null) {
+            lastDataReceivedAtMs = System.currentTimeMillis();
+        }
+        return line;
     }
 
     public boolean isConnected() {
         return socket != null && socket.isConnected() && !socket.isClosed();
+    }
+
+    /**
+     * Detect a half-open / silently-dead connection that the OS still reports as
+     * connected. {@link Socket#isConnected()} never flips back once connected, so
+     * we treat "no data for longer than idleTimeoutMs" as dead.
+     *
+     * @return true if connected but no data has arrived within idleTimeoutMs;
+     *         false when idleTimeoutMs &lt;= 0 (disabled) or never connected.
+     */
+    public boolean isStale(long idleTimeoutMs) {
+        if (idleTimeoutMs <= 0 || lastDataReceivedAtMs == 0) {
+            return false;
+        }
+        return System.currentTimeMillis() - lastDataReceivedAtMs > idleTimeoutMs;
     }
 
     /**

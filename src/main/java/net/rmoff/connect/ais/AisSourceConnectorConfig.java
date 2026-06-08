@@ -32,6 +32,12 @@ public class AisSourceConnectorConfig extends AbstractConfig {
     public static final String FRAGMENT_TIMEOUT_MS_CONFIG = "fragment.timeout.ms";
     private static final String FRAGMENT_TIMEOUT_MS_DOC = "Timeout in milliseconds for incomplete multi-sentence message fragments";
 
+    public static final String IDLE_TIMEOUT_MS_CONFIG = "idle.timeout.ms";
+    private static final String IDLE_TIMEOUT_MS_DOC =
+            "Force a reconnect if no data has been received from the feed for this many "
+            + "milliseconds. Guards against silently half-open TCP connections that the OS "
+            + "still reports as connected. Set to 0 to disable. Default 60000 (60s).";
+
     public static final String DECODE_COMMON_ONLY_CONFIG = "decode.common.only";
     private static final String DECODE_COMMON_ONLY_DOC = "When true, only common message types (position, static, base station, safety, AtoN) get full field decoding. Other types get common fields + raw_nmea only.";
 
@@ -55,6 +61,8 @@ public class AisSourceConnectorConfig extends AbstractConfig {
                     ConfigDef.Importance.LOW, RECONNECT_BACKOFF_MAX_MS_DOC)
             .define(FRAGMENT_TIMEOUT_MS_CONFIG, ConfigDef.Type.LONG, 30000L,
                     ConfigDef.Importance.LOW, FRAGMENT_TIMEOUT_MS_DOC)
+            .define(IDLE_TIMEOUT_MS_CONFIG, ConfigDef.Type.LONG, 60000L,
+                    ConfigDef.Importance.MEDIUM, IDLE_TIMEOUT_MS_DOC)
             .define(DECODE_COMMON_ONLY_CONFIG, ConfigDef.Type.BOOLEAN, true,
                     ConfigDef.Importance.MEDIUM, DECODE_COMMON_ONLY_DOC);
 
