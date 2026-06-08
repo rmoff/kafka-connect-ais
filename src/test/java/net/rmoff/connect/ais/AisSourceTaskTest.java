@@ -82,6 +82,7 @@ class AisSourceTaskTest {
         assertEquals("ais", config.getString("topic"));
         assertEquals(100L, config.getLong("poll.timeout.ms"));
         assertEquals(500, config.getInt("batch.max.size"));
+        assertEquals(60000L, config.getLong("idle.timeout.ms"));
         assertTrue(config.getBoolean("decode.common.only"));
         assertFalse(config.getBoolean("topic.per.type"));
     }

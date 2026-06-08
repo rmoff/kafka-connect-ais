@@ -23,10 +23,15 @@ public class AisSourceTask extends SourceTask {
     private long messageCount;
     private long pollTimeoutMs;
     private int batchMaxSize;
+    private long idleTimeoutMs;
+
+    // When there is nothing to return, sleep this long before returning null so
+    // Kafka Connect's WorkerSourceTask does not hot-loop poll() and pin a CPU core.
+    private static final long NO_DATA_SLEEP_MS = 100;
 
     @Override
     public String version() {
-        return "0.1.0";
+        return "0.2.0";
     }
 
     @Override
@@ -57,6 +62,7 @@ public class AisSourceTask extends SourceTask {
 
         pollTimeoutMs = config.getLong(AisSourceConnectorConfig.POLL_TIMEOUT_MS_CONFIG);
         batchMaxSize = config.getInt(AisSourceConnectorConfig.BATCH_MAX_SIZE_CONFIG);
+        idleTimeoutMs = config.getLong(AisSourceConnectorConfig.IDLE_TIMEOUT_MS_CONFIG);
 
         sourcePartition = Collections.singletonMap("host_port", host + ":" + port);
         connectionEpoch = System.currentTimeMillis();
@@ -81,11 +87,23 @@ public class AisSourceTask extends SourceTask {
         // Reconnect if needed
         if (!connection.isConnected()) {
             if (!connection.attemptReconnect()) {
-                return null; // Still in backoff, return immediately
+                // Still in backoff. Sleep so Connect doesn't hot-loop poll() at 100% CPU.
+                Thread.sleep(NO_DATA_SLEEP_MS);
+                return null;
             }
             connectionEpoch = System.currentTimeMillis();
             messageCount = 0;
             log.info("Reconnected to AIS endpoint");
+        }
+
+        // Idle watchdog: the OS may still report a half-open socket as connected.
+        // If no data has arrived for idleTimeoutMs, force a reconnect on the next poll.
+        if (connection.isStale(idleTimeoutMs)) {
+            log.warn("No data from AIS feed for >{}ms — forcing reconnect", idleTimeoutMs);
+            connection.disconnect();
+            parser.cleanStaleFragments();
+            Thread.sleep(NO_DATA_SLEEP_MS);
+            return null;
         }
 
         List<SourceRecord> records = new ArrayList<>();
@@ -125,7 +143,12 @@ public class AisSourceTask extends SourceTask {
         }
 
         parser.cleanStaleFragments();
-        return records.isEmpty() ? null : records;
+        if (records.isEmpty()) {
+            // No data this cycle — pace before returning null to avoid a busy-spin.
+            Thread.sleep(NO_DATA_SLEEP_MS);
+            return null;
+        }
+        return records;
     }
 
     @Override
