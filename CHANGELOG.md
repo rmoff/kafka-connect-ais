@@ -5,6 +5,19 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-06-08
+
+### Changed
+- **`exactlyOnceSupport` now reports `UNSUPPORTED`** (was `SUPPORTED`). This is
+  honest: the connector reads a live TCP feed that has no replay, and the task's
+  source offsets (`connection_epoch` / `message_count`) reset on every reconnect,
+  so exactly-once delivery cannot be guaranteed — it is best-effort at-least-once.
+
+### Removed
+- Unused `NmeaLineParser.normalizeTalkerId()` (and its now-orphaned
+  `TALKER_PATTERN`). The `dk.dma` parser handles `!BSVDM` natively; the method
+  was only referenced by a test.
+
 ## [0.2.0] - 2026-06-08
 
 First tagged release. Fixes a production incident where the connector silently
@@ -46,4 +59,5 @@ stopped delivering data for ~34 hours while still reporting `RUNNING`.
 - `NmeaLineParser.normalizeTalkerId()` is currently unused (the `dk.dma` parser
   handles `!BSVDM` directly).
 
+[0.2.1]: https://github.com/rmoff/kafka-connect-ais/releases/tag/v0.2.1
 [0.2.0]: https://github.com/rmoff/kafka-connect-ais/releases/tag/v0.2.0

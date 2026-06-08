@@ -21,10 +21,6 @@ public class NmeaLineParser {
     private static final Pattern TAG_BLOCK_PATTERN =
             Pattern.compile("^\\\\(.+?)\\\\(.+)$");
 
-    // Talker IDs to normalize: !BSVDM, !B2VDM, !BSVDO, etc. → !AIVDM / !AIVDO
-    private static final Pattern TALKER_PATTERN =
-            Pattern.compile("!B[S2]VD([MO])");
-
     private final long fragmentTimeoutMs;
     private final Map<String, FragmentEntry> fragments = new HashMap<>();
 
@@ -176,10 +172,6 @@ public class NmeaLineParser {
             String fullRaw = entry.firstLineRaw + "\n" + rawLine;
             return Optional.of(new ParseResult(msg, entry.sourceStation, entry.receiveTimestampMs, fullRaw));
         }
-    }
-
-    static String normalizeTalkerId(String nmea) {
-        return TALKER_PATTERN.matcher(nmea).replaceFirst("!AIVD$1");
     }
 
     /**

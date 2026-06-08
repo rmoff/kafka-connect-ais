@@ -20,7 +20,7 @@ public class AisSourceConnector extends SourceConnector {
 
     @Override
     public String version() {
-        return "0.2.0";
+        return "0.2.1";
     }
 
     @Override
@@ -63,11 +63,12 @@ public class AisSourceConnector extends SourceConnector {
         return AisSourceConnectorConfig.CONFIG_DEF;
     }
 
-    // AIS NMEA sentences are independently parseable and MMSI-keyed; the per-poll
-    // transaction boundary is safe. The TCP feed has no replay, so EOS here means
-    // "no duplicates within a connection" rather than end-to-end exactly-once.
+    // Best-effort at-least-once: this connector reads a live TCP AIS feed that has
+    // no replay, and the task's source offsets (connection_epoch / message_count)
+    // reset on every reconnect. A non-replayable live source cannot guarantee
+    // exactly-once delivery, so we honestly report UNSUPPORTED.
     @Override
     public ExactlyOnceSupport exactlyOnceSupport(Map<String, String> connectorConfig) {
-        return ExactlyOnceSupport.SUPPORTED;
+        return ExactlyOnceSupport.UNSUPPORTED;
     }
 }
