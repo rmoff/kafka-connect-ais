@@ -83,8 +83,21 @@ class AisSourceTaskTest {
         assertEquals(100L, config.getLong("poll.timeout.ms"));
         assertEquals(500, config.getInt("batch.max.size"));
         assertEquals(60000L, config.getLong("idle.timeout.ms"));
+        assertEquals(30000L, config.getLong("no.data.log.interval.ms"));
         assertTrue(config.getBoolean("decode.common.only"));
         assertFalse(config.getBoolean("topic.per.type"));
+    }
+
+    @Test
+    void noDataHeartbeatTiming() {
+        // interval 0 disables
+        assertFalse(AisSourceTask.dueForNoDataLog(10_000, 0, 0, 0));
+        // got data within the interval -> no heartbeat
+        assertFalse(AisSourceTask.dueForNoDataLog(10_000, 9_000, 0, 5_000));
+        // no data for >= interval and not logged recently -> heartbeat due
+        assertTrue(AisSourceTask.dueForNoDataLog(10_000, 2_000, 0, 5_000));
+        // no data for >= interval but already logged within interval -> throttled
+        assertFalse(AisSourceTask.dueForNoDataLog(10_000, 2_000, 8_000, 5_000));
     }
 
     @Test

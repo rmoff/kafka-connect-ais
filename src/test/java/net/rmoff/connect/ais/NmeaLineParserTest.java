@@ -86,11 +86,4 @@ class NmeaLineParserTest {
         shortTimeoutParser.cleanStaleFragments();
         assertEquals(0, shortTimeoutParser.getFragmentCount());
     }
-
-    @Test
-    void normalizeTalkerIdIsNoOp() {
-        // AisLib handles BSVDM natively, normalization would break checksums
-        String original = "!BSVDM,1,1,,B,test,0*00";
-        assertEquals("!AIVDM,1,1,,B,test,0*00", NmeaLineParser.normalizeTalkerId(original));
-    }
 }

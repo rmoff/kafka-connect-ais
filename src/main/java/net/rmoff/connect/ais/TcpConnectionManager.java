@@ -97,7 +97,8 @@ public class TcpConnectionManager {
             return false;
         }
         try {
-            close();
+            disconnect();  // NOT close() — close() sets `stopping`, which would block all
+                           // future reconnects after the first (the multi-reconnect bug).
             connect();
             return true;
         } catch (IOException e) {
@@ -146,6 +147,10 @@ public class TcpConnectionManager {
             }
             socket = null;
         }
+    }
+
+    public long getLastDataReceivedAtMs() {
+        return lastDataReceivedAtMs;
     }
 
     public String getHost() {

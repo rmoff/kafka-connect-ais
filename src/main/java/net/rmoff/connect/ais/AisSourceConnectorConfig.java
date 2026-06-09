@@ -32,6 +32,12 @@ public class AisSourceConnectorConfig extends AbstractConfig {
     public static final String FRAGMENT_TIMEOUT_MS_CONFIG = "fragment.timeout.ms";
     private static final String FRAGMENT_TIMEOUT_MS_DOC = "Timeout in milliseconds for incomplete multi-sentence message fragments";
 
+    public static final String NO_DATA_LOG_INTERVAL_MS_CONFIG = "no.data.log.interval.ms";
+    private static final String NO_DATA_LOG_INTERVAL_MS_DOC =
+            "While connected but receiving no data, log an INFO heartbeat at most this "
+            + "often (ms) so a starved/silent feed connection is visible in the logs "
+            + "instead of looking like a healthy idle connector. Set to 0 to disable. Default 30000.";
+
     public static final String IDLE_TIMEOUT_MS_CONFIG = "idle.timeout.ms";
     private static final String IDLE_TIMEOUT_MS_DOC =
             "Force a reconnect if no data has been received from the feed for this many "
@@ -63,6 +69,8 @@ public class AisSourceConnectorConfig extends AbstractConfig {
                     ConfigDef.Importance.LOW, FRAGMENT_TIMEOUT_MS_DOC)
             .define(IDLE_TIMEOUT_MS_CONFIG, ConfigDef.Type.LONG, 60000L,
                     ConfigDef.Importance.MEDIUM, IDLE_TIMEOUT_MS_DOC)
+            .define(NO_DATA_LOG_INTERVAL_MS_CONFIG, ConfigDef.Type.LONG, 30000L,
+                    ConfigDef.Importance.LOW, NO_DATA_LOG_INTERVAL_MS_DOC)
             .define(DECODE_COMMON_ONLY_CONFIG, ConfigDef.Type.BOOLEAN, true,
                     ConfigDef.Importance.MEDIUM, DECODE_COMMON_ONLY_DOC);
 
