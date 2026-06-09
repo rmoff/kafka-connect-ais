@@ -1,5 +1,7 @@
 = Kafka Connect AIS Source Connector
 
+image:https://github.com/rmoff/kafka-connect-ais/actions/workflows/build.yml/badge.svg[Build]
+
 NOTE: This is a proof of concept, built to explore using Claude Code to write a Kafka Connect connector from scratch. The connector has not been tested beyond the basic quickstart below. Use at your own risk.
 
 A Kafka Connect source connector that ingests live https://en.wikipedia.org/wiki/Automatic_identification_system[AIS] (Automatic Identification System) maritime data from TCP endpoints and produces structured records to Kafka.
@@ -418,8 +420,6 @@ Every record carries these Kafka headers for routing/filtering without deseriali
 == AIS data sources
 
 The default endpoint in the quickstart is the Norwegian Coastal Administration's public AIS feed. It streams roughly 15 messages per second of live vessel traffic around the Norwegian coast. No authentication required.
-
-Other public AIS TCP feeds exist -- search for "AIS TCP feed" or check https://www.aishub.net/[AISHub].
 
 == How it works
 
