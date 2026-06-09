@@ -407,8 +407,6 @@ Every record carries these Kafka headers for routing/filtering without deseriali
 
 The default endpoint in the quickstart is the Norwegian Coastal Administration's public AIS feed. It streams roughly 15 messages per second of live vessel traffic around the Norwegian coast. No authentication required.
 
-Other public AIS TCP feeds exist -- search for "AIS TCP feed" or check https://www.aishub.net/[AISHub].
-
 == How it works
 
 This is a TCP stream source connector, which is a bit different from the typical database/API source pattern:
