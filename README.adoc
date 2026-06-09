@@ -22,20 +22,24 @@ image::docs/architecture.excalidraw.png[Architecture diagram]
 
 == Quickstart
 
-You'll need Java 11+, Maven, Docker, and https://github.com/kcctl/kcctl[kcctl].
+Runs the connector locally against Kafka in Docker, using the pre-built release --- no build required. (To run it on Confluent Cloud instead, see <<deploy-confluent-cloud>>.)
 
-Build the connector JAR:
+You'll need Docker, https://github.com/kcctl/kcctl[kcctl], and the https://cli.github.com/[GitHub CLI] (`gh`) --- or grab the `.zip` from the https://github.com/rmoff/kafka-connect-ais/releases[Releases page] by hand.
 
-[source,bash]
-----
-mvn clean package -DskipTests
-----
-
-Start Kafka, Schema Registry, and Kafka Connect:
+Download the latest released connector into `./plugins/`:
 
 [source,bash]
 ----
-docker compose up -d --build
+mkdir -p plugins
+gh release download --repo rmoff/kafka-connect-ais --pattern '*.zip' --dir plugins
+unzip -o plugins/*.zip -d plugins
+----
+
+Start Kafka, Schema Registry, and Kafka Connect (the connector is mounted from `./plugins/`):
+
+[source,bash]
+----
+docker compose up -d
 ----
 
 Point kcctl at the Connect worker:
@@ -168,25 +172,35 @@ Check the registered Avro schemas:
 curl -s http://localhost:8081/subjects | jq .
 ----
 
-== Deploy to Confluent Cloud Custom Connectors
+[#deploy-confluent-cloud]
+== Deploy as a Custom Connector on Confluent Cloud
 
-The same shaded JAR runs as a https://docs.confluent.io/cloud/current/connectors/bring-your-connector/overview.html#install-custom-connectors-for-ccloud[Custom Connector for Confluent Cloud]. The flow is: build the JAR, upload it as a plugin, then create the connector against your CC cluster.
+The connector runs as a https://docs.confluent.io/cloud/current/connectors/bring-your-connector/overview.html#install-custom-connectors-for-ccloud[Custom Connector for Confluent Cloud]. The flow is: get the component archive, upload it as a plugin, then create the connector against your CC cluster.
 
 You'll need the https://docs.confluent.io/confluent-cli/current/overview.html[`confluent` CLI] logged into your environment.
 
-Build the JAR (same as the local path):
+Get the component archive. Either download a published release (no build needed):
+
+[source,bash]
+----
+# latest release, into the current directory
+gh release download --repo rmoff/kafka-connect-ais --pattern '*.zip'
+----
+
+...or build it from source:
 
 [source,bash]
 ----
 mvn clean package -DskipTests
+# -> target/components/packages/rmoff-kafka-connect-ais-<version>.zip
 ----
 
-Upload as a CC Custom Connector plugin (returns a `ccp-XXXXXX` plugin ID, keep it):
+Upload as a CC Custom Connector plugin (returns a `ccp-XXXXXX` plugin ID, keep it). Use the component **`.zip`** --- it carries the connector and its dependencies plus a `manifest.json`:
 
 [source,bash]
 ----
 confluent connect custom-plugin create kafka-connect-ais \
-  --plugin-file target/kafka-connect-ais-0.1.0-SNAPSHOT.jar \
+  --plugin-file rmoff-kafka-connect-ais-0.2.1.zip \
   --connector-class net.rmoff.connect.ais.AisSourceConnector \
   --connector-type source \
   --cloud aws
@@ -431,10 +445,18 @@ Requires Java 11+ and Maven.
 mvn clean package
 ----
 
-The build produces two usable artifacts:
+The build produces two usable artifacts (where `<version>` matches the project version, e.g. `0.2.1`):
 
-* `target/kafka-connect-ais-0.1.0-SNAPSHOT.jar` -- the shaded fat JAR. Drop it into a Connect worker's `plugin.path` directory, or upload it to Confluent Cloud via `confluent connect custom-plugin create`.
-* `target/components/packages/rmoff-kafka-connect-ais-0.1.0-SNAPSHOT.zip` -- a Confluent component archive with a `manifest.json` (produced by the `kafka-connect-maven-plugin`). This is the canonical https://www.confluent.io/hub/[Confluent Hub] / Marketplace format and is also accepted by `confluent connect custom-plugin create --plugin-file ...`.
+* `target/components/packages/rmoff-kafka-connect-ais-<version>.zip` -- a Confluent component archive with a `manifest.json` (produced by the `kafka-connect-maven-plugin`). This is the canonical https://www.confluent.io/hub/[Confluent Hub] / Marketplace format, it's what each GitHub release ships, and it's the recommended `--plugin-file` for `confluent connect custom-plugin create` (it bundles the connector + its dependencies).
+* `target/kafka-connect-ais-<version>.jar` -- the shaded fat JAR. Drop it into a self-managed Connect worker's `plugin.path` directory.
+
+To try a local build with the Docker quickstart, unpack the component archive into `./plugins/` (where `docker-compose.yml` mounts it) instead of downloading a release:
+
+[source,bash]
+----
+mkdir -p plugins && unzip -o target/components/packages/*.zip -d plugins
+docker compose up -d
+----
 
 == Credits
 

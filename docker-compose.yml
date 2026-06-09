@@ -78,4 +78,6 @@ services:
       CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components,/plugins
     volumes:
-      - ./target/kafka-connect-ais-0.1.0-SNAPSHOT.jar:/plugins/kafka-connect-ais/kafka-connect-ais-0.1.0-SNAPSHOT.jar
+      # Drop the connector's Confluent component archive (the released .zip,
+      # unpacked) in ./plugins. See the Quickstart in README.adoc.
+      - ./plugins:/usr/share/confluent-hub-components
