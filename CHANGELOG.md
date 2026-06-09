@@ -5,7 +5,29 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.1] - 2026-06-08
+## [0.2.1] - 2026-06-09
+
+### Fixed
+- **Multi-reconnect bug: the connector could only reconnect once.**
+  `attemptReconnect()` called `close()`, which sets the `stopping` flag (intended
+  for task shutdown); the `if (stopping) return false` guard then blocked every
+  subsequent reconnect. Against a feed that hands out silent/starved connections
+  (accepts the socket but sends no data), the connector would reconnect once, draw
+  another silent connection, and then sit `RUNNING` with zero data forever.
+  Reconnect cleanup now uses `disconnect()` (which does not set `stopping`).
+  This is the true cause of the v0.2.0 deploys that never produced; v0.2.0 should
+  be considered superseded.
+
+### Added
+- **`no.data.log.interval.ms`** (default 30000): while connected but receiving no
+  data, log an INFO heartbeat at most this often, so a starved/silent feed
+  connection is visible in the logs instead of looking like a healthy idle
+  connector. Set to 0 to disable.
+- Test harness `FakeAisFeed` (LIVE / SILENT, per-connection control) and
+  `AisDeadFeedTest` covering live, permanently-silent (reconnect without
+  busy-spin), and starved-then-live recovery — the last of which is what caught
+  the multi-reconnect bug above (the previous reconnect test only ever exercised a
+  single reconnect, so it passed despite the bug).
 
 ### Changed
 - **`exactlyOnceSupport` now reports `UNSUPPORTED`** (was `SUPPORTED`). This is

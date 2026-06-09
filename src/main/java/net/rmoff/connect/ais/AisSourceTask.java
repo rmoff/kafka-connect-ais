@@ -24,10 +24,22 @@ public class AisSourceTask extends SourceTask {
     private long pollTimeoutMs;
     private int batchMaxSize;
     private long idleTimeoutMs;
+    private long noDataLogIntervalMs;
+    private long lastNoDataLogAtMs;
 
     // When there is nothing to return, sleep this long before returning null so
     // Kafka Connect's WorkerSourceTask does not hot-loop poll() and pin a CPU core.
     private static final long NO_DATA_SLEEP_MS = 100;
+
+    /**
+     * Decide whether to emit a "connected but no data" heartbeat log now: enabled
+     * (intervalMs &gt; 0), no data for at least intervalMs, and not logged within intervalMs.
+     */
+    static boolean dueForNoDataLog(long nowMs, long lastDataMs, long lastLogMs, long intervalMs) {
+        if (intervalMs <= 0) return false;
+        if (nowMs - lastDataMs < intervalMs) return false;
+        return nowMs - lastLogMs >= intervalMs;
+    }
 
     @Override
     public String version() {
@@ -63,6 +75,8 @@ public class AisSourceTask extends SourceTask {
         pollTimeoutMs = config.getLong(AisSourceConnectorConfig.POLL_TIMEOUT_MS_CONFIG);
         batchMaxSize = config.getInt(AisSourceConnectorConfig.BATCH_MAX_SIZE_CONFIG);
         idleTimeoutMs = config.getLong(AisSourceConnectorConfig.IDLE_TIMEOUT_MS_CONFIG);
+        noDataLogIntervalMs = config.getLong(AisSourceConnectorConfig.NO_DATA_LOG_INTERVAL_MS_CONFIG);
+        lastNoDataLogAtMs = 0;
 
         sourcePartition = Collections.singletonMap("host_port", host + ":" + port);
         connectionEpoch = System.currentTimeMillis();
@@ -144,6 +158,16 @@ public class AisSourceTask extends SourceTask {
 
         parser.cleanStaleFragments();
         if (records.isEmpty()) {
+            // Heartbeat: make a connected-but-starved/silent feed visible in the logs.
+            long now = System.currentTimeMillis();
+            if (connection.isConnected()
+                    && dueForNoDataLog(now, connection.getLastDataReceivedAtMs(), lastNoDataLogAtMs, noDataLogIntervalMs)) {
+                log.info("Connected to {}:{} but received no AIS data for {}ms — the feed may be "
+                                + "silent or starving this connection",
+                        connection.getHost(), connection.getPort(),
+                        now - connection.getLastDataReceivedAtMs());
+                lastNoDataLogAtMs = now;
+            }
             // No data this cycle — pace before returning null to avoid a busy-spin.
             Thread.sleep(NO_DATA_SLEEP_MS);
             return null;
