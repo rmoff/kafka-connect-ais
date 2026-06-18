@@ -53,6 +53,12 @@ public class AisSourceConnectorConfig extends AbstractConfig {
             "Socket read timeout (SO_TIMEOUT) in milliseconds; bounds how long a single "
             + "poll() read blocks waiting for data.";
 
+    public static final String METRICS_LOG_INTERVAL_MS_CONFIG = "metrics.log.interval.ms";
+    private static final String METRICS_LOG_INTERVAL_MS_DOC =
+            "Emit a one-line INFO metrics summary at most this often (ms). Set to 0 to disable. "
+            + "This is the primary observability surface on runtimes without JMX access "
+            + "(e.g. Confluent Cloud Custom Connectors).";
+
     public static final String DECODE_COMMON_ONLY_CONFIG = "decode.common.only";
     private static final String DECODE_COMMON_ONLY_DOC = "When true, only common message types (position, static, base station, safety, AtoN) get full field decoding. Other types get common fields + raw_nmea only.";
 
@@ -84,6 +90,8 @@ public class AisSourceConnectorConfig extends AbstractConfig {
                     ConfigDef.Range.atLeast(1), ConfigDef.Importance.LOW, CONNECT_TIMEOUT_MS_DOC)
             .define(SO_TIMEOUT_MS_CONFIG, ConfigDef.Type.INT, 1000,
                     ConfigDef.Range.atLeast(1), ConfigDef.Importance.LOW, SO_TIMEOUT_MS_DOC)
+            .define(METRICS_LOG_INTERVAL_MS_CONFIG, ConfigDef.Type.LONG, 60000L,
+                    ConfigDef.Importance.LOW, METRICS_LOG_INTERVAL_MS_DOC)
             .define(DECODE_COMMON_ONLY_CONFIG, ConfigDef.Type.BOOLEAN, true,
                     ConfigDef.Importance.MEDIUM, DECODE_COMMON_ONLY_DOC);
 

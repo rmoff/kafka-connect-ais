@@ -5,6 +5,9 @@ import org.apache.kafka.connect.source.SourceTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.management.InstanceNotFoundException;
+import javax.management.ObjectName;
+import java.lang.management.ManagementFactory;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.util.*;
@@ -26,6 +29,10 @@ public class AisSourceTask extends SourceTask {
     private long idleTimeoutMs;
     private long noDataLogIntervalMs;
     private long lastNoDataLogAtMs;
+    private TaskMetrics metrics;
+    private long metricsLogIntervalMs;
+    private long lastMetricsLogAtMs;
+    private ObjectName metricsObjectName;
 
     // When there is nothing to return, sleep this long before returning null so
     // Kafka Connect's WorkerSourceTask does not hot-loop poll() and pin a CPU core.
@@ -38,6 +45,12 @@ public class AisSourceTask extends SourceTask {
     static boolean dueForNoDataLog(long nowMs, long lastDataMs, long lastLogMs, long intervalMs) {
         if (intervalMs <= 0) return false;
         if (nowMs - lastDataMs < intervalMs) return false;
+        return nowMs - lastLogMs >= intervalMs;
+    }
+
+    /** True when metrics logging is enabled (intervalMs &gt; 0) and intervalMs has elapsed since last log. */
+    static boolean dueForMetricsLog(long nowMs, long lastLogMs, long intervalMs) {
+        if (intervalMs <= 0) return false;
         return nowMs - lastLogMs >= intervalMs;
     }
 
@@ -79,6 +92,9 @@ public class AisSourceTask extends SourceTask {
         idleTimeoutMs = config.getLong(AisSourceConnectorConfig.IDLE_TIMEOUT_MS_CONFIG);
         noDataLogIntervalMs = config.getLong(AisSourceConnectorConfig.NO_DATA_LOG_INTERVAL_MS_CONFIG);
         lastNoDataLogAtMs = 0;
+        metrics = new TaskMetrics();
+        metricsLogIntervalMs = config.getLong(AisSourceConnectorConfig.METRICS_LOG_INTERVAL_MS_CONFIG);
+        lastMetricsLogAtMs = 0;
 
         sourcePartition = Collections.singletonMap("host_port", host + ":" + port);
         connectionEpoch = System.currentTimeMillis();
@@ -91,6 +107,20 @@ public class AisSourceTask extends SourceTask {
         } catch (IOException e) {
             log.warn("Initial connection to {}:{} failed: {}. Will retry in poll().",
                     host, port, e.getMessage());
+        }
+        try {
+            metricsObjectName = new ObjectName(
+                    "net.rmoff.connect.ais:type=TaskMetrics,host=" + host + ",port=" + port);
+            try {
+                ManagementFactory.getPlatformMBeanServer().unregisterMBean(metricsObjectName);
+            } catch (InstanceNotFoundException ignored) {
+                // no stale bean to remove — normal first start
+            }
+            ManagementFactory.getPlatformMBeanServer().registerMBean(metrics, metricsObjectName);
+        } catch (Exception e) {
+            log.info("JMX metrics registration unavailable ({}); relying on log metrics only",
+                    e.getClass().getSimpleName());
+            metricsObjectName = null;
         }
     }
 
@@ -110,6 +140,7 @@ public class AisSourceTask extends SourceTask {
             connectionEpoch = System.currentTimeMillis();
             messageCount = 0;
             log.info("Reconnected to AIS endpoint");
+            metrics.recordReconnect();
         }
 
         // Idle watchdog: the OS may still report a half-open socket as connected.
@@ -136,6 +167,7 @@ public class AisSourceTask extends SourceTask {
                 }
 
                 NmeaLineParser.ParseOutcome outcome = parser.parseLine(line);
+                metrics.recordOutcome(outcome.kind());
                 switch (outcome.kind()) {
                     case PARSED:
                         messageCount++;
@@ -168,6 +200,11 @@ public class AisSourceTask extends SourceTask {
         }
 
         parser.cleanStaleFragments();
+        long nowForMetrics = System.currentTimeMillis();
+        if (dueForMetricsLog(nowForMetrics, lastMetricsLogAtMs, metricsLogIntervalMs)) {
+            log.info(metrics.summary(parser.getFragmentCount(), nowForMetrics - connectionEpoch));
+            lastMetricsLogAtMs = nowForMetrics;
+        }
         if (records.isEmpty()) {
             // Heartbeat: make a connected-but-starved/silent feed visible in the logs.
             long now = System.currentTimeMillis();
@@ -192,6 +229,13 @@ public class AisSourceTask extends SourceTask {
         stopping = true;
         if (connection != null) {
             connection.close();
+        }
+        if (metricsObjectName != null) {
+            try {
+                ManagementFactory.getPlatformMBeanServer().unregisterMBean(metricsObjectName);
+            } catch (Exception ignored) {
+                // best effort
+            }
         }
     }
 
