@@ -362,6 +362,16 @@ kcat -b <bootstrap> -X security.protocol=SASL_SSL \
 |`30000`
 |Timeout for incomplete multi-sentence messages
 
+|`tcp.connect.timeout.ms`
+|INT
+|`10000`
+|TCP connect timeout in milliseconds.
+
+|`tcp.socket.timeout.ms`
+|INT
+|`1000`
+|Socket read timeout (SO_TIMEOUT) in ms; bounds how long a single poll() read blocks.
+
 |`idle.timeout.ms`
 |LONG
 |`60000`

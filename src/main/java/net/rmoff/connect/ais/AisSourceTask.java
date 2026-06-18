@@ -61,7 +61,9 @@ public class AisSourceTask extends SourceTask {
         connection = new TcpConnectionManager(
                 host, port,
                 config.getLong(AisSourceConnectorConfig.RECONNECT_BACKOFF_INITIAL_MS_CONFIG),
-                config.getLong(AisSourceConnectorConfig.RECONNECT_BACKOFF_MAX_MS_CONFIG)
+                config.getLong(AisSourceConnectorConfig.RECONNECT_BACKOFF_MAX_MS_CONFIG),
+                config.getInt(AisSourceConnectorConfig.CONNECT_TIMEOUT_MS_CONFIG),
+                config.getInt(AisSourceConnectorConfig.SO_TIMEOUT_MS_CONFIG)
         );
 
         parser = new NmeaLineParser(config.getLong(AisSourceConnectorConfig.FRAGMENT_TIMEOUT_MS_CONFIG));

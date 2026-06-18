@@ -14,8 +14,6 @@ import java.nio.charset.StandardCharsets;
 public class TcpConnectionManager {
 
     private static final Logger log = LoggerFactory.getLogger(TcpConnectionManager.class);
-    private static final int CONNECT_TIMEOUT_MS = 10000;
-    private static final int SO_TIMEOUT_MS = 1000;
     // NMEA sentences are ~82 chars; with a tag block and AIS payload still well under this.
     // Bounds memory against a malicious/garbled feed sending an unterminated line.
     private static final int MAX_LINE_LENGTH = 1024;
@@ -24,6 +22,8 @@ public class TcpConnectionManager {
     private final int port;
     private final long initialBackoffMs;
     private final long maxBackoffMs;
+    private final int connectTimeoutMs;
+    private final int soTimeoutMs;
 
     private volatile Socket socket;
     private volatile BufferedReader reader;
@@ -35,20 +35,23 @@ public class TcpConnectionManager {
     private volatile boolean stopping;
     private volatile long lastDataReceivedAtMs;
 
-    public TcpConnectionManager(String host, int port, long initialBackoffMs, long maxBackoffMs) {
+    public TcpConnectionManager(String host, int port, long initialBackoffMs, long maxBackoffMs,
+                                int connectTimeoutMs, int soTimeoutMs) {
         this.host = host;
         this.port = port;
         this.initialBackoffMs = initialBackoffMs;
         this.maxBackoffMs = maxBackoffMs;
         this.currentBackoffMs = initialBackoffMs;
         this.nextReconnectTime = 0;
+        this.connectTimeoutMs = connectTimeoutMs;
+        this.soTimeoutMs = soTimeoutMs;
     }
 
     public void connect() throws IOException {
         log.info("Connecting to AIS endpoint {}:{}", host, port);
         socket = new Socket();
-        socket.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
-        socket.setSoTimeout(SO_TIMEOUT_MS);
+        socket.connect(new InetSocketAddress(host, port), connectTimeoutMs);
+        socket.setSoTimeout(soTimeoutMs);
         socket.setKeepAlive(true);
         reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
         lineBuffer.setLength(0);  // drop any partial line left over from a dropped connection

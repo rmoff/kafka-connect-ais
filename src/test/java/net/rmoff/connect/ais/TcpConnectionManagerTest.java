@@ -32,7 +32,7 @@ class TcpConnectionManagerTest {
             sender.setDaemon(true);
             sender.start();
 
-            TcpConnectionManager conn = new TcpConnectionManager("127.0.0.1", port, 100, 1000);
+            TcpConnectionManager conn = new TcpConnectionManager("127.0.0.1", port, 100, 1000, 10000, 1000);
             conn.connect();
 
             // Fresh connection is never stale.
@@ -54,7 +54,7 @@ class TcpConnectionManagerTest {
 
     @Test
     void isStaleFalseBeforeAnyConnection() {
-        TcpConnectionManager conn = new TcpConnectionManager("127.0.0.1", 1, 100, 1000);
+        TcpConnectionManager conn = new TcpConnectionManager("127.0.0.1", 1, 100, 1000, 10000, 1000);
         assertFalse(conn.isStale(500), "never-connected manager must not be stale");
     }
 }
