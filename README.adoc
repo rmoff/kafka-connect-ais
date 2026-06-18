@@ -408,10 +408,10 @@ Counters:
 * `incompleteFragments` -- multi-sentence fragments not yet fully assembled
 * `unsupportedTypes` -- AIS message types not recognised by the decoder
 * `reconnects` -- number of TCP reconnections since the task started
-* `fragmentBuffer` -- incomplete fragments currently held in memory
-* `uptimeMs` -- milliseconds since the current TCP connection epoch
+* `fragmentBuffer` -- incomplete fragments currently held in memory (log heartbeat only)
+* `uptimeMs` -- milliseconds since the current TCP connection epoch (log heartbeat only)
 
-On self-managed Kafka Connect workers with JMX enabled, the same counters are also exposed via JMX at ObjectName `net.rmoff.connect.ais:type=TaskMetrics,host=<host>,port=<port>`. The log heartbeat is the primary observability surface on runtimes without JMX access (e.g. Confluent Cloud Custom Connectors).
+On self-managed Kafka Connect workers with JMX enabled, the five cumulative counters (`emitted`, `decodeErrors`, `incompleteFragments`, `unsupportedTypes`, `reconnects`) are also exposed via JMX at ObjectName `net.rmoff.connect.ais:type=TaskMetrics,host=<host>,port=<port>`. The `fragmentBuffer` and `uptimeMs` values appear in the log heartbeat only — they are not on the MBean. The log heartbeat is the primary observability surface on runtimes without JMX access (e.g. Confluent Cloud Custom Connectors).
 
 Set `metrics.log.interval.ms=0` to disable the log heartbeat entirely.
 

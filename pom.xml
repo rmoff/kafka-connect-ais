@@ -166,11 +166,11 @@
                             </requirements>
 
                             <deliveryGuarantee>
-                                <deliveryGuarantee>exactlyOnce</deliveryGuarantee>
+                                <deliveryGuarantee>atLeastOnce</deliveryGuarantee>
                             </deliveryGuarantee>
 
                             <title>AIS Source Connector</title>
-                            <description>Ingests live AIS (Automatic Identification System) maritime data over TCP and produces structured Avro records to Kafka. Decodes all 28 AIS message types, keys records by MMSI, optionally routes per message-type to separate topics, and supports exactly-once delivery within a TCP connection.</description>
+                            <description>Ingests live AIS (Automatic Identification System) maritime data over TCP and produces structured Avro records to Kafka. Decodes all 28 AIS message types, keys records by MMSI, optionally routes per message-type to separate topics, with at-least-once delivery (no duplicates within a single TCP connection; the upstream feed has no replay).</description>
 
                             <sourceUrl>https://github.com/rmoff/kafka-connect-ais</sourceUrl>
                             <documentationUrl>https://github.com/rmoff/kafka-connect-ais#readme</documentationUrl>

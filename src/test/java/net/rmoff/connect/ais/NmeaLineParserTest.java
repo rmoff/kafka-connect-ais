@@ -49,7 +49,9 @@ class NmeaLineParserTest {
         NmeaLineParser.ParseOutcome r2 = parser.parseLine(TYPE5_SENT2);
         assertEquals(NmeaLineParser.ParseOutcome.Kind.PARSED, r2.kind());
         assertEquals(0, parser.getFragmentCount());
-        assertEquals(5, ((NmeaLineParser.Parsed) r2).result.message.getMsgId());
+        NmeaLineParser.ParseResult parsed = ((NmeaLineParser.Parsed) r2).result;
+        assertEquals(5, parsed.message.getMsgId());
+        assertTrue(parsed.rawNmea.contains("\n"), "multi-sentence rawNmea should join both lines");
     }
 
     @Test

@@ -1,8 +1,10 @@
 package net.rmoff.connect.ais;
 
 /**
- * Cumulative per-task counters. Mutated only on the single task (poll) thread;
- * counters are read by JMX, so they are declared volatile for visibility.
+ * Cumulative per-task counters. There is a single writer (the poll thread); counters
+ * are declared volatile so JMX reader threads see up-to-date values. Note: reads across
+ * multiple counters (e.g. {@link #summary}) are not an atomic snapshot — a JMX reader may
+ * observe one counter updated and another not. That is acceptable for an observability surface.
  */
 public class TaskMetrics implements TaskMetricsMBean {
     private volatile long messagesEmitted;
