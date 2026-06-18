@@ -200,7 +200,7 @@ Upload as a CC Custom Connector plugin (returns a `ccp-XXXXXX` plugin ID, keep i
 [source,bash]
 ----
 confluent connect custom-plugin create kafka-connect-ais \
-  --plugin-file rmoff-kafka-connect-ais-0.2.2.zip \
+  --plugin-file rmoff-kafka-connect-ais-0.3.0.zip \
   --connector-class net.rmoff.connect.ais.AisSourceConnector \
   --connector-type source \
   --cloud aws
@@ -492,7 +492,7 @@ Requires Java 11+ and Maven.
 mvn clean package
 ----
 
-The build produces two usable artifacts (where `<version>` matches the project version, e.g. `0.2.2`):
+The build produces two usable artifacts (where `<version>` matches the project version, e.g. `0.3.0`):
 
 * `target/components/packages/rmoff-kafka-connect-ais-<version>.zip` -- a Confluent component archive with a `manifest.json` (produced by the `kafka-connect-maven-plugin`). This is the canonical https://www.confluent.io/hub/[Confluent Hub] / Marketplace format, it's what each GitHub release ships, and it's the recommended `--plugin-file` for `confluent connect custom-plugin create` (it bundles the connector + its dependencies).
 * `target/kafka-connect-ais-<version>.jar` -- the shaded fat JAR. Drop it into a self-managed Connect worker's `plugin.path` directory.

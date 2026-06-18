@@ -5,6 +5,22 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-06-18
+
+### Added
+- **Observability**: per-task counters (messages emitted, decode errors, incomplete
+  fragments, unsupported types, reconnects, fragment-buffer size, connection uptime),
+  emitted as a one-line INFO heartbeat every `metrics.log.interval.ms` (default 60000,
+  0 disables) and registered as a JMX MBean (best-effort) for self-managed workers.
+- **`tcp.connect.timeout.ms`** (default 10000) and **`tcp.socket.timeout.ms`**
+  (default 1000): the previously hardcoded TCP timeouts are now configurable.
+
+### Changed
+- **Parse outcomes are now categorized** (`Parsed` / `IncompleteFragment` /
+  `UnsupportedType` / `DecodeError`). Genuine decode/checksum failures now log at WARN
+  (with the truncated raw line); benign cases (in-progress fragments, unsupported
+  message types) stay at DEBUG. Previously every non-result was indistinguishable.
+
 ## [0.2.2] - 2026-06-18
 
 ### Security
@@ -105,6 +121,7 @@ stopped delivering data for ~34 hours while still reporting `RUNNING`.
 - `NmeaLineParser.normalizeTalkerId()` is currently unused (the `dk.dma` parser
   handles `!BSVDM` directly).
 
+[0.3.0]: https://github.com/rmoff/kafka-connect-ais/releases/tag/v0.3.0
 [0.2.2]: https://github.com/rmoff/kafka-connect-ais/releases/tag/v0.2.2
 [0.2.1]: https://github.com/rmoff/kafka-connect-ais/releases/tag/v0.2.1
 [0.2.0]: https://github.com/rmoff/kafka-connect-ais/releases/tag/v0.2.0
