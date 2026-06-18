@@ -6,7 +6,7 @@
 
     <groupId>net.rmoff.connect</groupId>
     <artifactId>kafka-connect-ais</artifactId>
-    <version>0.2.1</version>
+    <version>0.2.2</version>
     <packaging>jar</packaging>
 
     <name>Kafka Connect AIS Source Connector</name>

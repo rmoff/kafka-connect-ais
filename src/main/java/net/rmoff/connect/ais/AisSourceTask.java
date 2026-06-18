@@ -43,7 +43,7 @@ public class AisSourceTask extends SourceTask {
 
     @Override
     public String version() {
-        return "0.2.1";
+        return "0.2.2";
     }
 
     @Override

@@ -6,8 +6,8 @@ import dk.dma.ais.sentence.Vdm;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -21,8 +21,24 @@ public class NmeaLineParser {
     private static final Pattern TAG_BLOCK_PATTERN =
             Pattern.compile("^\\\\(.+?)\\\\(.+)$");
 
+    // Cap on in-flight multi-sentence fragments. A flood of never-completed fragment-1
+    // sentences (or unique-prefix garbage) would otherwise grow the map without bound;
+    // time-based cleanup alone can't keep up if they arrive faster than they expire.
+    private static final int MAX_FRAGMENTS = 1000;
+
     private final long fragmentTimeoutMs;
-    private final Map<String, FragmentEntry> fragments = new HashMap<>();
+    private final Map<String, FragmentEntry> fragments =
+            new LinkedHashMap<String, FragmentEntry>(16, 0.75f, false) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, FragmentEntry> eldest) {
+                    if (size() > MAX_FRAGMENTS) {
+                        log.warn("Fragment buffer full ({} entries); evicting oldest incomplete "
+                                + "message {}", size(), eldest.getKey());
+                        return true;
+                    }
+                    return false;
+                }
+            };
 
     public NmeaLineParser(long fragmentTimeoutMs) {
         this.fragmentTimeoutMs = fragmentTimeoutMs;

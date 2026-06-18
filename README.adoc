@@ -200,7 +200,7 @@ Upload as a CC Custom Connector plugin (returns a `ccp-XXXXXX` plugin ID, keep i
 [source,bash]
 ----
 confluent connect custom-plugin create kafka-connect-ais \
-  --plugin-file rmoff-kafka-connect-ais-0.2.1.zip \
+  --plugin-file rmoff-kafka-connect-ais-0.2.2.zip \
   --connector-class net.rmoff.connect.ais.AisSourceConnector \
   --connector-type source \
   --cloud aws
@@ -362,6 +362,16 @@ kcat -b <bootstrap> -X security.protocol=SASL_SSL \
 |`30000`
 |Timeout for incomplete multi-sentence messages
 
+|`idle.timeout.ms`
+|LONG
+|`60000`
+|Force a reconnect if no data has been received from the feed for this many ms. Guards against silently half-open TCP connections that the OS still reports as connected. Set to `0` to disable.
+
+|`no.data.log.interval.ms`
+|LONG
+|`30000`
+|While connected but receiving no data, log an INFO heartbeat at most this often (ms) so a starved/silent feed connection is visible in the logs. Set to `0` to disable.
+
 |`decode.common.only`
 |BOOLEAN
 |`true`
@@ -432,7 +442,7 @@ This is a TCP stream source connector, which is a bit different from the typical
 * `SO_TIMEOUT` on the socket prevents `poll()` from blocking forever on a stalled connection
 * `stop()` closes the socket from a different thread, which unblocks any pending read
 
-The connector declares `ExactlyOnceSupport.SUPPORTED`. AIS NMEA sentences are independently parseable and MMSI-keyed, the per-poll transaction boundary is safe, and each task tracks a `{connection_epoch, message_count}` offset per host. Practically this means "no duplicate writes within a connection" -- not end-to-end exactly-once, because the upstream TCP feed itself has no replay (messages during a connector outage are simply lost).
+The connector declares `ExactlyOnceSupport.UNSUPPORTED`. The upstream AIS TCP feed has no replay -- messages broadcast during a connector outage are simply lost -- so end-to-end exactly-once is impossible regardless of how Connect commits offsets. Each task does track a `{connection_epoch, message_count}` offset per host, but this is for monitoring rather than replay: the offset cannot be used to resume the stream where it left off.
 
 AIS message decoding is handled by https://github.com/dma-ais/AisLib[AisLib] from the Danish Maritime Authority.
 
@@ -445,7 +455,7 @@ Requires Java 11+ and Maven.
 mvn clean package
 ----
 
-The build produces two usable artifacts (where `<version>` matches the project version, e.g. `0.2.1`):
+The build produces two usable artifacts (where `<version>` matches the project version, e.g. `0.2.2`):
 
 * `target/components/packages/rmoff-kafka-connect-ais-<version>.zip` -- a Confluent component archive with a `manifest.json` (produced by the `kafka-connect-maven-plugin`). This is the canonical https://www.confluent.io/hub/[Confluent Hub] / Marketplace format, it's what each GitHub release ships, and it's the recommended `--plugin-file` for `confluent connect custom-plugin create` (it bundles the connector + its dependencies).
 * `target/kafka-connect-ais-<version>.jar` -- the shaded fat JAR. Drop it into a self-managed Connect worker's `plugin.path` directory.

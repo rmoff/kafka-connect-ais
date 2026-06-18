@@ -20,7 +20,7 @@ public class AisSourceConnector extends SourceConnector {
 
     @Override
     public String version() {
-        return "0.2.1";
+        return "0.2.2";
     }
 
     @Override

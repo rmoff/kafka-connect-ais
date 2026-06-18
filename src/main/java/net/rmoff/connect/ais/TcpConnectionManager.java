@@ -16,14 +16,20 @@ public class TcpConnectionManager {
     private static final Logger log = LoggerFactory.getLogger(TcpConnectionManager.class);
     private static final int CONNECT_TIMEOUT_MS = 10000;
     private static final int SO_TIMEOUT_MS = 1000;
+    // NMEA sentences are ~82 chars; with a tag block and AIS payload still well under this.
+    // Bounds memory against a malicious/garbled feed sending an unterminated line.
+    private static final int MAX_LINE_LENGTH = 1024;
 
     private final String host;
     private final int port;
     private final long initialBackoffMs;
     private final long maxBackoffMs;
 
-    private Socket socket;
-    private BufferedReader reader;
+    private volatile Socket socket;
+    private volatile BufferedReader reader;
+    // Partial line carried across readLine() calls so a mid-line SO_TIMEOUT resumes
+    // correctly instead of corrupting the next sentence. Only touched by the task thread.
+    private final StringBuilder lineBuffer = new StringBuilder();
     private long currentBackoffMs;
     private long nextReconnectTime;
     private volatile boolean stopping;
@@ -45,6 +51,7 @@ public class TcpConnectionManager {
         socket.setSoTimeout(SO_TIMEOUT_MS);
         socket.setKeepAlive(true);
         reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+        lineBuffer.setLength(0);  // drop any partial line left over from a dropped connection
         currentBackoffMs = initialBackoffMs;
         nextReconnectTime = 0;
         lastDataReceivedAtMs = System.currentTimeMillis();
@@ -54,16 +61,42 @@ public class TcpConnectionManager {
     /**
      * Read a line from the TCP stream.
      *
+     * <p>Reads character-by-character (rather than {@link BufferedReader#readLine()}) so the
+     * accumulated line length can be bounded: a feed that never sends a line terminator would
+     * otherwise let {@code readLine()} buffer without limit and exhaust the heap. A {@code
+     * SocketTimeoutException} mid-line is expected — the partial line is retained in
+     * {@code lineBuffer} and the next call resumes where it left off.
+     *
      * @return the line, or null if the connection was closed by the remote end
      * @throws SocketTimeoutException if SO_TIMEOUT elapsed with no data
-     * @throws IOException on connection error
+     * @throws IOException on connection error, or if a line exceeds {@link #MAX_LINE_LENGTH}
      */
     public String readLine() throws IOException {
-        String line = reader.readLine();
-        if (line != null) {
-            lastDataReceivedAtMs = System.currentTimeMillis();
+        int c;
+        while ((c = reader.read()) != -1) {
+            if (c == '\n') {
+                String line = lineBuffer.toString();
+                lineBuffer.setLength(0);
+                lastDataReceivedAtMs = System.currentTimeMillis();
+                return line;
+            }
+            if (c != '\r') {
+                lineBuffer.append((char) c);
+                if (lineBuffer.length() > MAX_LINE_LENGTH) {
+                    lineBuffer.setLength(0);
+                    throw new IOException("Line exceeded maximum length of " + MAX_LINE_LENGTH
+                            + " bytes without a terminator; dropping connection");
+                }
+            }
         }
-        return line;
+        // Remote closed the stream. Flush any unterminated trailing line, else signal close.
+        if (lineBuffer.length() > 0) {
+            String line = lineBuffer.toString();
+            lineBuffer.setLength(0);
+            lastDataReceivedAtMs = System.currentTimeMillis();
+            return line;
+        }
+        return null;
     }
 
     public boolean isConnected() {

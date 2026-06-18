@@ -5,6 +5,30 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-06-18
+
+### Security
+- **Bounded the TCP line read.** `TcpConnectionManager.readLine()` previously used
+  `BufferedReader.readLine()`, which buffers without limit — a feed (or MITM) sending an
+  unterminated line could exhaust the heap. Reading is now char-by-char with a 1024-byte
+  cap, throwing and dropping the connection past the limit. A partial line is carried in a
+  persistent buffer so a mid-line `SocketTimeoutException` resumes correctly rather than
+  corrupting the next sentence.
+- **Capped in-flight multi-sentence fragments.** `NmeaLineParser` used an unbounded
+  `HashMap`; a flood of never-completed fragment sentences could grow it faster than the
+  time-based cleanup expires them. Now a size-capped `LinkedHashMap` (max 1000, LRU
+  eviction with a warning).
+
+### Fixed
+- **Thread-safety on the connection.** `socket` and `reader` in `TcpConnectionManager` are
+  now `volatile`; `stop()` (Connect thread) and `poll()` (task thread) access them across
+  threads.
+
+### Documentation
+- README exactly-once description rewritten to state `UNSUPPORTED`, matching the code (the
+  prose had lagged the 0.2.1 code change and was internally self-contradictory).
+- Documented `idle.timeout.ms` and `no.data.log.interval.ms` in the README config table.
+
 ## [0.2.1] - 2026-06-09
 
 ### Fixed
@@ -81,5 +105,6 @@ stopped delivering data for ~34 hours while still reporting `RUNNING`.
 - `NmeaLineParser.normalizeTalkerId()` is currently unused (the `dk.dma` parser
   handles `!BSVDM` directly).
 
+[0.2.2]: https://github.com/rmoff/kafka-connect-ais/releases/tag/v0.2.2
 [0.2.1]: https://github.com/rmoff/kafka-connect-ais/releases/tag/v0.2.1
 [0.2.0]: https://github.com/rmoff/kafka-connect-ais/releases/tag/v0.2.0
