@@ -135,15 +135,24 @@ public class AisSourceTask extends SourceTask {
                     break;
                 }
 
-                Optional<NmeaLineParser.ParseResult> result = parser.parseLine(line);
-                if (result.isPresent()) {
-                    messageCount++;
-                    Map<String, Object> sourceOffset = new HashMap<>();
-                    sourceOffset.put("connection_epoch", connectionEpoch);
-                    sourceOffset.put("message_count", messageCount);
-
-                    SourceRecord record = converter.convert(result.get(), sourcePartition, sourceOffset);
-                    records.add(record);
+                NmeaLineParser.ParseOutcome outcome = parser.parseLine(line);
+                switch (outcome.kind()) {
+                    case PARSED:
+                        messageCount++;
+                        Map<String, Object> sourceOffset = new HashMap<>();
+                        sourceOffset.put("connection_epoch", connectionEpoch);
+                        sourceOffset.put("message_count", messageCount);
+                        NmeaLineParser.ParseResult pr = ((NmeaLineParser.Parsed) outcome).result;
+                        records.add(converter.convert(pr, sourcePartition, sourceOffset));
+                        break;
+                    case DECODE_ERROR:
+                        log.warn("AIS decode error: {} | raw: {}",
+                                ((NmeaLineParser.DecodeError) outcome).reason, truncate(line, 100));
+                        break;
+                    case UNSUPPORTED_TYPE:
+                    case INCOMPLETE_FRAGMENT:
+                    default:
+                        break; // benign
                 }
             } catch (SocketTimeoutException e) {
                 // Normal: no data available within SO_TIMEOUT
@@ -184,5 +193,10 @@ public class AisSourceTask extends SourceTask {
         if (connection != null) {
             connection.close();
         }
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max) + "...";
     }
 }

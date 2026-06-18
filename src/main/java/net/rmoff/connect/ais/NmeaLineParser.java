@@ -1,7 +1,8 @@
 package net.rmoff.connect.ais;
 
+import dk.dma.ais.binary.SixbitException;
 import dk.dma.ais.message.AisMessage;
-import dk.dma.ais.sentence.SentenceException;
+import dk.dma.ais.message.AisMessageException;
 import dk.dma.ais.sentence.Vdm;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,7 +10,6 @@ import org.slf4j.LoggerFactory;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -58,6 +58,35 @@ public class NmeaLineParser {
         }
     }
 
+    /** Categorized outcome of parsing one raw line. */
+    public abstract static class ParseOutcome {
+        public enum Kind { PARSED, INCOMPLETE_FRAGMENT, UNSUPPORTED_TYPE, DECODE_ERROR }
+        public abstract Kind kind();
+
+        public static final IncompleteFragment INCOMPLETE = new IncompleteFragment();
+        public static final UnsupportedType UNSUPPORTED = new UnsupportedType();
+    }
+
+    public static final class Parsed extends ParseOutcome {
+        public final ParseResult result;
+        public Parsed(ParseResult result) { this.result = result; }
+        @Override public Kind kind() { return Kind.PARSED; }
+    }
+
+    public static final class IncompleteFragment extends ParseOutcome {
+        @Override public Kind kind() { return Kind.INCOMPLETE_FRAGMENT; }
+    }
+
+    public static final class UnsupportedType extends ParseOutcome {
+        @Override public Kind kind() { return Kind.UNSUPPORTED_TYPE; }
+    }
+
+    public static final class DecodeError extends ParseOutcome {
+        public final String reason;
+        public DecodeError(String reason) { this.reason = reason; }
+        @Override public Kind kind() { return Kind.DECODE_ERROR; }
+    }
+
     private static class FragmentEntry {
         final Vdm vdm;
         final String firstLineRaw;
@@ -78,11 +107,11 @@ public class NmeaLineParser {
      * Parse a raw line from the AIS TCP stream.
      *
      * @param line raw line including optional tag block
-     * @return parsed result if a complete message was decoded, empty for fragments or errors
+     * @return categorized outcome of parsing: Parsed, IncompleteFragment, UnsupportedType, or DecodeError
      */
-    public Optional<ParseResult> parseLine(String line) {
+    public ParseOutcome parseLine(String line) {
         if (line == null || line.isEmpty()) {
-            return Optional.empty();
+            return ParseOutcome.INCOMPLETE;
         }
 
         String sourceStation = null;
@@ -120,7 +149,7 @@ public class NmeaLineParser {
         String[] fields = nmeaSentence.split(",", 7);
         if (fields.length < 6) {
             log.debug("Malformed NMEA sentence (too few fields): {}", nmeaSentence);
-            return Optional.empty();
+            return new DecodeError("malformed NMEA (too few fields)");
         }
 
         int numSentences;
@@ -130,7 +159,7 @@ public class NmeaLineParser {
             sentenceNum = Integer.parseInt(fields[2]);
         } catch (NumberFormatException e) {
             log.debug("Invalid sentence numbering: {}", nmeaSentence);
-            return Optional.empty();
+            return new DecodeError("invalid sentence numbering");
         }
 
         try {
@@ -139,26 +168,29 @@ public class NmeaLineParser {
             } else {
                 return parseMultiSentence(nmeaSentence, sentenceNum, fields, sourceStation, receiveTimestampMs, line);
             }
+        } catch (AisMessageException | SixbitException e) {
+            log.debug("Unsupported AIS message type: {} - {}", e.getClass().getSimpleName(), e.getMessage());
+            return ParseOutcome.UNSUPPORTED;
         } catch (Exception e) {
             log.debug("Failed to parse AIS message: {} - {}", e.getClass().getSimpleName(), e.getMessage());
-            return Optional.empty();
+            return new DecodeError(e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 
-    private Optional<ParseResult> parseSingleSentence(String nmea, String station, long timestampMs, String rawLine)
+    private ParseOutcome parseSingleSentence(String nmea, String station, long timestampMs, String rawLine)
             throws Exception {
         Vdm vdm = new Vdm();
         int result = vdm.parse(nmea);
         if (result != 0) {
             log.debug("Unexpected parse result {} for single sentence: {}", result, nmea);
-            return Optional.empty();
+            return new DecodeError("vdm parse result " + result);
         }
         AisMessage msg = AisMessage.getInstance(vdm);
-        return Optional.of(new ParseResult(msg, station, timestampMs, rawLine));
+        return new Parsed(new ParseResult(msg, station, timestampMs, rawLine));
     }
 
-    private Optional<ParseResult> parseMultiSentence(String nmea, int sentenceNum, String[] fields,
-                                                      String station, long timestampMs, String rawLine)
+    private ParseOutcome parseMultiSentence(String nmea, int sentenceNum, String[] fields,
+                                             String station, long timestampMs, String rawLine)
             throws Exception {
         // Fragment key: channel + sequential message ID
         String channel = fields.length > 4 ? fields[4] : "";
@@ -170,23 +202,23 @@ public class NmeaLineParser {
             Vdm vdm = new Vdm();
             vdm.parse(nmea);
             fragments.put(fragKey, new FragmentEntry(vdm, rawLine, station, timestampMs));
-            return Optional.empty();
+            return ParseOutcome.INCOMPLETE;
         } else {
             // Continuation
             FragmentEntry entry = fragments.remove(fragKey);
             if (entry == null) {
                 log.debug("Received continuation fragment without first part, key={}", fragKey);
-                return Optional.empty();
+                return ParseOutcome.INCOMPLETE;
             }
             int result = entry.vdm.parse(nmea);
             if (result != 0) {
                 // Still need more sentences — put it back
                 fragments.put(fragKey, entry);
-                return Optional.empty();
+                return ParseOutcome.INCOMPLETE;
             }
             AisMessage msg = AisMessage.getInstance(entry.vdm);
             String fullRaw = entry.firstLineRaw + "\n" + rawLine;
-            return Optional.of(new ParseResult(msg, entry.sourceStation, entry.receiveTimestampMs, fullRaw));
+            return new Parsed(new ParseResult(msg, entry.sourceStation, entry.receiveTimestampMs, fullRaw));
         }
     }
 
