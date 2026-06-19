@@ -2,6 +2,7 @@ package net.rmoff.connect.ais;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -9,6 +10,7 @@ import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.List;
+import java.util.function.IntPredicate;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -150,6 +152,99 @@ class TcpConnectionManagerTest {
             for (String line : got) {
                 assertEquals(MSG, line, "split line must be reassembled byte-for-byte");
             }
+        }
+    }
+
+    /**
+     * Server that accepts connections and, per 1-based connection number, either sends
+     * one line before closing (productive) or closes immediately with no data (the NCA
+     * feed's "starve a fresh connection" behaviour). Always closes → client sees EOF.
+     */
+    private static ServerSocket closingServer(IntPredicate sendLineForConn) throws IOException {
+        ServerSocket server = new ServerSocket(0);
+        Thread t = new Thread(() -> {
+            int n = 0;
+            try {
+                while (!server.isClosed()) {
+                    Socket c = server.accept();
+                    n++;
+                    if (sendLineForConn.test(n)) {
+                        PrintWriter out = new PrintWriter(c.getOutputStream(), true);
+                        out.println(MSG);
+                        Thread.sleep(80);   // let the client read it before we close
+                    }
+                    c.close();
+                }
+            } catch (Exception ignored) { }
+        });
+        t.setDaemon(true);
+        t.start();
+        return server;
+    }
+
+    @Test
+    void unproductiveCloseDelaysReconnect() throws Exception {
+        try (ServerSocket server = closingServer(n -> false)) {   // every connection: immediate close, no data
+            long initial = 500;
+            TcpConnectionManager conn =
+                    new TcpConnectionManager("127.0.0.1", server.getLocalPort(), initial, 4000, 10000, 200);
+            conn.connect();
+            assertNull(conn.readLine(), "server closed with no data → EOF");
+            conn.connectionEnded();
+
+            // A starved (no-data) connection must NOT be retried immediately — that is the
+            // ~35-reconnects/min hammering seen against the live feed.
+            assertFalse(conn.attemptReconnect(),
+                    "reconnect after an unproductive close must wait for the backoff");
+            Thread.sleep(initial + 200);
+            assertTrue(conn.attemptReconnect(), "after the backoff elapses, reconnect proceeds");
+            conn.close();
+        }
+    }
+
+    @Test
+    void backoffGrowsAndCapsAcrossUnproductiveCloses() throws Exception {
+        try (ServerSocket server = closingServer(n -> false)) {
+            long initial = 100, max = 400;
+            TcpConnectionManager conn =
+                    new TcpConnectionManager("127.0.0.1", server.getLocalPort(), initial, max, 10000, 200);
+
+            conn.connect(); assertNull(conn.readLine()); conn.connectionEnded();
+            assertEquals(200, conn.currentBackoffMs(), "after 1 unproductive close: initial*2");
+
+            Thread.sleep(120); assertTrue(conn.attemptReconnect());
+            assertNull(conn.readLine()); conn.connectionEnded();
+            assertEquals(400, conn.currentBackoffMs(), "after 2: initial*4, capped at max");
+
+            Thread.sleep(220); assertTrue(conn.attemptReconnect());
+            assertNull(conn.readLine()); conn.connectionEnded();
+            assertEquals(400, conn.currentBackoffMs(), "stays capped at max");
+            conn.close();
+        }
+    }
+
+    @Test
+    void productiveConnectionResetsBackoff() throws Exception {
+        // connections 1 & 2 are starved (grow the backoff); connection 3 delivers a line.
+        try (ServerSocket server = closingServer(n -> n >= 3)) {
+            long initial = 100, max = 800;
+            TcpConnectionManager conn =
+                    new TcpConnectionManager("127.0.0.1", server.getLocalPort(), initial, max, 10000, 200);
+
+            conn.connect(); assertNull(conn.readLine()); conn.connectionEnded();   // #1 starved
+            Thread.sleep(120); assertTrue(conn.attemptReconnect());
+            assertNull(conn.readLine()); conn.connectionEnded();                   // #2 starved
+            assertEquals(400, conn.currentBackoffMs(), "backoff grew over starved connections");
+
+            Thread.sleep(220); assertTrue(conn.attemptReconnect());                // #3 live
+            assertEquals(MSG, conn.readLine(), "connection #3 delivers data");
+            conn.connectionEnded();
+
+            assertEquals(initial, conn.currentBackoffMs(),
+                    "a productive connection must reset the backoff to initial");
+            assertTrue(conn.attemptReconnect(),
+                    "after a productive connection, reconnect is prompt (no backoff wait)");
+            conn.close();
         }
     }
 

@@ -162,7 +162,7 @@ public class AisSourceTask extends SourceTask {
                 if (line == null) {
                     // Remote end closed connection
                     log.warn("AIS connection closed by remote end");
-                    connection.disconnect();
+                    connection.connectionEnded();
                     break;
                 }
 
@@ -194,7 +194,7 @@ public class AisSourceTask extends SourceTask {
                     break;
                 }
                 log.warn("Connection error: {}. Will reconnect on next poll.", e.getMessage());
-                connection.disconnect();
+                connection.connectionEnded();
                 break;
             }
         }

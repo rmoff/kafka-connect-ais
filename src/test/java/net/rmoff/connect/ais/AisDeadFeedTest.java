@@ -80,6 +80,38 @@ class AisDeadFeedTest {
     }
 
     /**
+     * Starved-by-close: every connection is accepted then immediately closed (EOF) — the
+     * other shape of NCA feed starvation (distinct from SILENT, which stays open). Without
+     * reconnect backoff this hammers the feed at one reconnect per poll cycle (dozens in a
+     * few seconds — the ~35/min churn observed live). With exponential backoff the reconnect
+     * count is bounded.
+     */
+    @Test
+    void closeStormFeedBacksOffInsteadOfHammering() throws Exception {
+        try (FakeAisFeed feed = new FakeAisFeed()) {
+            feed.modeForConnection(n -> FakeAisFeed.Mode.CLOSE);
+            AisSourceTask task = new AisSourceTask();
+            Map<String, String> p = props(feed.port(), 60000);   // watchdog irrelevant: socket closes
+            p.put("reconnect.backoff.initial.ms", "200");
+            p.put("reconnect.backoff.max.ms", "2000");
+            task.start(p);
+            try {
+                long deadline = System.currentTimeMillis() + 5000;
+                while (System.currentTimeMillis() < deadline) {
+                    task.poll();
+                }
+                int conns = feed.connectionCount();
+                // Backoff 200→400→800→1600→2000(cap) sums to ~6 reconnects in 5s.
+                // Unbounded hammering would be dozens (one per ~100ms poll cycle).
+                assertTrue(conns <= 12,
+                        "accept-then-close feed must back off, not hammer (connections=" + conns + ")");
+                assertTrue(conns >= 2,
+                        "must still keep retrying a starved feed (connections=" + conns + ")");
+            } finally { task.stop(); }
+        }
+    }
+
+    /**
      * Realistic recovery: the first two connections are starved (silent) and only the
      * third streams data — mirroring the real feed handing out silent connections at
      * random. The connector must keep cycling via the watchdog until it draws a live
