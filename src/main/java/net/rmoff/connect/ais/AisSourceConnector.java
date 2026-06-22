@@ -50,7 +50,34 @@ public class AisSourceConnector extends SourceConnector {
             configs.add(taskConfig);
         }
         log.info("Created {} task configs for {} hosts", numTasks, hostList.length);
+        for (String warning : connectionWarnings(maxTasks, hostList.length)) {
+            log.warn(warning);
+        }
         return configs;
+    }
+
+    /**
+     * Operational warnings about how many connections this connector will open.
+     * The connector runs one connection per host (capped at maxTasks), so it opens
+     * min(maxTasks, numHosts) connections.
+     */
+    static List<String> connectionWarnings(int maxTasks, int numHosts) {
+        List<String> warnings = new ArrayList<>();
+        int numConnections = Math.min(maxTasks, numHosts);
+        if (maxTasks > numHosts) {
+            warnings.add("tasks.max=" + maxTasks + " exceeds the " + numHosts
+                    + " configured host(s); only " + numConnections + " task(s)/connection(s) "
+                    + "will run (this connector opens one connection per host).");
+        }
+        if (numConnections > 1) {
+            warnings.add("This connector will open " + numConnections + " simultaneous "
+                    + "connections. NOTE: on at least one public AIS feed (Norwegian Coastal "
+                    + "Administration) multiple connections sharing one source IP were observed "
+                    + "to compete — connections get cycled/starved and throughput collapses. "
+                    + "Prefer one connection per source IP: ensure these endpoints are distinct "
+                    + "feeds and/or egress from distinct IPs. This may be specific to that feed.");
+        }
+        return warnings;
     }
 
     @Override

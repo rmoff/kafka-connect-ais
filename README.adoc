@@ -393,6 +393,22 @@ kcat -b <bootstrap> -X security.protocol=SASL_SSL \
 |When true, only the most useful message types get full field decoding (position, identity, base station, safety, AtoN). Binary/control types get common fields + `raw_nmea` only.
 |===
 
+[NOTE]
+====
+*One connection per source IP.* In testing against the Norwegian Coastal
+Administration feed, opening *multiple simultaneous connections from the same
+source IP* caused the connections to compete: they were repeatedly cycled and
+starved, and overall throughput collapsed — while a *single* connection from
+that IP stayed stable and streamed steadily. A single TCP connection per source
+IP avoided it entirely.
+
+Practically: keep `tasks.max=1` per host, and avoid running several connectors
+(or other AIS clients) behind a shared egress IP/NAT pointing at the same feed.
+The connector logs a WARN if it is configured to open more than one connection.
+This behaviour may be specific to this particular feed; treat it as something to
+be aware of rather than a universal rule.
+====
+
 === Observability
 
 Each task emits a one-line INFO metrics summary to the log every `metrics.log.interval.ms` (default 60 s). The line reports cumulative counters since the task started:
