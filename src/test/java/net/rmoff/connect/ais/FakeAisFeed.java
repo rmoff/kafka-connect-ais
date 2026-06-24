@@ -23,7 +23,7 @@ import java.util.function.IntFunction;
  */
 class FakeAisFeed implements AutoCloseable {
 
-    enum Mode { LIVE, SILENT }
+    enum Mode { LIVE, SILENT, CLOSE }
 
     /** A real, decodable single-sentence AIS line. */
     static final String SAMPLE_LINE =
@@ -53,10 +53,13 @@ class FakeAisFeed implements AutoCloseable {
                 Socket s = server.accept();
                 open.add(s);
                 int n = connections.incrementAndGet();
-                if (modeForConnection.apply(n) == Mode.LIVE) {
+                Mode mode = modeForConnection.apply(n);
+                if (mode == Mode.LIVE) {
                     Thread t = new Thread(() -> stream(s), "fake-ais-stream-" + n);
                     t.setDaemon(true);
                     t.start();
+                } else if (mode == Mode.CLOSE) {
+                    s.close();   // accept then immediately close → client sees EOF
                 }
                 // SILENT: leave the socket open and send nothing.
             } catch (IOException e) {

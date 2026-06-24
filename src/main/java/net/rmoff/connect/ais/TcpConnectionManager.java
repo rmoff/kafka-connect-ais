@@ -34,6 +34,11 @@ public class TcpConnectionManager {
     private long nextReconnectTime;
     private volatile boolean stopping;
     private volatile long lastDataReceivedAtMs;
+    // Whether the currently-open connection has delivered any data. The NCA feed
+    // routinely accepts a fresh socket then closes it without sending anything; such
+    // an unproductive connection must trigger reconnect backoff, while a connection
+    // that did deliver data resets the backoff. Task-thread only.
+    private boolean dataReceivedThisConnection;
 
     public TcpConnectionManager(String host, int port, long initialBackoffMs, long maxBackoffMs,
                                 int connectTimeoutMs, int soTimeoutMs) {
@@ -55,8 +60,10 @@ public class TcpConnectionManager {
         socket.setKeepAlive(true);
         reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
         lineBuffer.setLength(0);  // drop any partial line left over from a dropped connection
-        currentBackoffMs = initialBackoffMs;
-        nextReconnectTime = 0;
+        // NB: do NOT reset the backoff here. A successful TCP connect does not mean the
+        // feed will actually deliver data — the backoff is cleared only once data arrives
+        // (see connectionEnded()), so a run of accept-then-close connections still backs off.
+        dataReceivedThisConnection = false;
         lastDataReceivedAtMs = System.currentTimeMillis();
         log.info("Connected to AIS endpoint {}:{}", host, port);
     }
@@ -80,7 +87,7 @@ public class TcpConnectionManager {
             if (c == '\n') {
                 String line = lineBuffer.toString();
                 lineBuffer.setLength(0);
-                lastDataReceivedAtMs = System.currentTimeMillis();
+                markDataReceived();
                 return line;
             }
             if (c != '\r') {
@@ -96,7 +103,7 @@ public class TcpConnectionManager {
         if (lineBuffer.length() > 0) {
             String line = lineBuffer.toString();
             lineBuffer.setLength(0);
-            lastDataReceivedAtMs = System.currentTimeMillis();
+            markDataReceived();
             return line;
         }
         return null;
@@ -183,6 +190,38 @@ public class TcpConnectionManager {
             }
             socket = null;
         }
+    }
+
+    private void markDataReceived() {
+        lastDataReceivedAtMs = System.currentTimeMillis();
+        dataReceivedThisConnection = true;
+    }
+
+    /**
+     * Record that the active connection has ended (remote EOF, read error, or the idle
+     * watchdog). Closes the socket and sets the reconnect schedule:
+     * <ul>
+     *   <li>If the connection delivered data, it was a genuine feed that dropped — reset
+     *       the backoff so we reconnect promptly.</li>
+     *   <li>If it delivered nothing (a starved / immediately-closed connection — the NCA
+     *       feed does this to fresh connections), apply the current backoff and grow it,
+     *       so a run of starved connections spaces out instead of hammering the feed at
+     *       tens of reconnects per minute.</li>
+     * </ul>
+     */
+    public void connectionEnded() {
+        if (dataReceivedThisConnection) {
+            currentBackoffMs = initialBackoffMs;
+            nextReconnectTime = 0;
+        } else {
+            nextReconnectTime = System.currentTimeMillis() + currentBackoffMs;
+            currentBackoffMs = Math.min(currentBackoffMs * 2, maxBackoffMs);
+        }
+        disconnect();
+    }
+
+    long currentBackoffMs() {
+        return currentBackoffMs;
     }
 
     public long getLastDataReceivedAtMs() {

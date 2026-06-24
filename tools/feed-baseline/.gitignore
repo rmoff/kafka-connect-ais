@@ -1,0 +1,5 @@
+# Probe output / run artifacts — not source
+probe-*.jsonl
+probe-*.stdout
+__pycache__/
+*.pyc
