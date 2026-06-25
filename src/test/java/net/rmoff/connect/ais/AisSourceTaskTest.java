@@ -101,6 +101,13 @@ class AisSourceTaskTest {
     }
 
     @Test
+    void dueForMetricsLogRespectsInterval() {
+        assertTrue(AisSourceTask.dueForMetricsLog(60000, 0, 60000));
+        assertFalse(AisSourceTask.dueForMetricsLog(60000, 30000, 60000));
+        assertFalse(AisSourceTask.dueForMetricsLog(99999, 50000, 0));
+    }
+
+    @Test
     void configValidationRejectsInvalidHosts() {
         Map<String, String> props = new HashMap<>();
         props.put("ais.hosts", "invalid-no-port");

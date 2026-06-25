@@ -3,8 +3,6 @@ package net.rmoff.connect.ais;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class NmeaLineParserTest {
@@ -24,53 +22,48 @@ class NmeaLineParserTest {
 
     @Test
     void parsesSingleSentenceWithTagBlock() {
-        Optional<NmeaLineParser.ParseResult> result = parser.parseLine(TYPE1_WITH_TAG);
-        assertTrue(result.isPresent(), "Should parse a single-sentence message");
-
-        NmeaLineParser.ParseResult parsed = result.get();
+        NmeaLineParser.ParseOutcome outcome = parser.parseLine(TYPE1_WITH_TAG);
+        assertEquals(NmeaLineParser.ParseOutcome.Kind.PARSED, outcome.kind());
+        NmeaLineParser.ParseResult parsed = ((NmeaLineParser.Parsed) outcome).result;
         assertEquals("2573305", parsed.sourceStation);
         assertEquals(1774373593000L, parsed.receiveTimestampMs);
-        assertNotNull(parsed.message);
         assertEquals(1, parsed.message.getMsgId());
         assertEquals(257230800, parsed.message.getUserId());
     }
 
     @Test
     void parsesSingleSentenceWithoutTagBlock() {
-        Optional<NmeaLineParser.ParseResult> result = parser.parseLine(TYPE1_BARE);
-        assertTrue(result.isPresent());
-
-        NmeaLineParser.ParseResult parsed = result.get();
+        NmeaLineParser.ParseOutcome outcome = parser.parseLine(TYPE1_BARE);
+        assertEquals(NmeaLineParser.ParseOutcome.Kind.PARSED, outcome.kind());
+        NmeaLineParser.ParseResult parsed = ((NmeaLineParser.Parsed) outcome).result;
         assertNull(parsed.sourceStation);
-        assertNotNull(parsed.message);
         assertEquals(1, parsed.message.getMsgId());
     }
 
     @Test
     void handlesMultiSentenceMessages() {
-        Optional<NmeaLineParser.ParseResult> result1 = parser.parseLine(TYPE5_SENT1);
-        assertFalse(result1.isPresent(), "First fragment should not produce a result");
+        NmeaLineParser.ParseOutcome r1 = parser.parseLine(TYPE5_SENT1);
+        assertEquals(NmeaLineParser.ParseOutcome.Kind.INCOMPLETE_FRAGMENT, r1.kind());
         assertEquals(1, parser.getFragmentCount());
 
-        Optional<NmeaLineParser.ParseResult> result2 = parser.parseLine(TYPE5_SENT2);
-        assertTrue(result2.isPresent(), "Second fragment should complete the message");
+        NmeaLineParser.ParseOutcome r2 = parser.parseLine(TYPE5_SENT2);
+        assertEquals(NmeaLineParser.ParseOutcome.Kind.PARSED, r2.kind());
         assertEquals(0, parser.getFragmentCount());
-
-        NmeaLineParser.ParseResult parsed = result2.get();
+        NmeaLineParser.ParseResult parsed = ((NmeaLineParser.Parsed) r2).result;
         assertEquals(5, parsed.message.getMsgId());
-        assertTrue(parsed.rawNmea.contains("\n"), "Raw NMEA should contain both sentences");
+        assertTrue(parsed.rawNmea.contains("\n"), "multi-sentence rawNmea should join both lines");
     }
 
     @Test
-    void handlesNullAndEmptyLines() {
-        assertFalse(parser.parseLine(null).isPresent());
-        assertFalse(parser.parseLine("").isPresent());
+    void nullAndEmptyAreIncompleteFragment() {
+        assertEquals(NmeaLineParser.ParseOutcome.Kind.INCOMPLETE_FRAGMENT, parser.parseLine(null).kind());
+        assertEquals(NmeaLineParser.ParseOutcome.Kind.INCOMPLETE_FRAGMENT, parser.parseLine("").kind());
     }
 
     @Test
-    void handlesMalformedSentences() {
-        assertFalse(parser.parseLine("garbage data").isPresent());
-        assertFalse(parser.parseLine("!AIVDM,bad").isPresent());
+    void malformedLinesAreDecodeError() {
+        assertEquals(NmeaLineParser.ParseOutcome.Kind.DECODE_ERROR, parser.parseLine("garbage data").kind());
+        assertEquals(NmeaLineParser.ParseOutcome.Kind.DECODE_ERROR, parser.parseLine("!AIVDM,bad").kind());
     }
 
     @Test

@@ -200,7 +200,7 @@ Upload as a CC Custom Connector plugin (returns a `ccp-XXXXXX` plugin ID, keep i
 [source,bash]
 ----
 confluent connect custom-plugin create kafka-connect-ais \
-  --plugin-file rmoff-kafka-connect-ais-0.2.1.zip \
+  --plugin-file rmoff-kafka-connect-ais-0.3.0.zip \
   --connector-class net.rmoff.connect.ais.AisSourceConnector \
   --connector-type source \
   --cloud aws
@@ -362,11 +362,74 @@ kcat -b <bootstrap> -X security.protocol=SASL_SSL \
 |`30000`
 |Timeout for incomplete multi-sentence messages
 
+|`tcp.connect.timeout.ms`
+|INT
+|`10000`
+|TCP connect timeout in milliseconds.
+
+|`tcp.socket.timeout.ms`
+|INT
+|`1000`
+|Socket read timeout (SO_TIMEOUT) in ms; bounds how long a single poll() read blocks.
+
+|`idle.timeout.ms`
+|LONG
+|`60000`
+|Force a reconnect if no data has been received from the feed for this many ms. Guards against silently half-open TCP connections that the OS still reports as connected. Set to `0` to disable.
+
+|`no.data.log.interval.ms`
+|LONG
+|`30000`
+|While connected but receiving no data, log an INFO heartbeat at most this often (ms) so a starved/silent feed connection is visible in the logs. Set to `0` to disable.
+
+|`metrics.log.interval.ms`
+|LONG
+|`60000`
+|Emit a one-line INFO metrics summary at most this often (ms). `0` disables. Primary observability surface where JMX is unavailable (e.g. Confluent Cloud Custom Connectors).
+
 |`decode.common.only`
 |BOOLEAN
 |`true`
 |When true, only the most useful message types get full field decoding (position, identity, base station, safety, AtoN). Binary/control types get common fields + `raw_nmea` only.
 |===
+
+[NOTE]
+====
+*One connection per source IP.* In testing against the Norwegian Coastal
+Administration feed, opening *multiple simultaneous connections from the same
+source IP* caused the connections to compete: they were repeatedly cycled and
+starved, and overall throughput collapsed — while a *single* connection from
+that IP stayed stable and streamed steadily. A single TCP connection per source
+IP avoided it entirely.
+
+Practically: keep `tasks.max=1` per host, and avoid running several connectors
+(or other AIS clients) behind a shared egress IP/NAT pointing at the same feed.
+The connector logs a WARN if it is configured to open more than one connection.
+This behaviour may be specific to this particular feed; treat it as something to
+be aware of rather than a universal rule.
+====
+
+=== Observability
+
+Each task emits a one-line INFO metrics summary to the log every `metrics.log.interval.ms` (default 60 s). The line reports cumulative counters since the task started:
+
+----
+AIS task metrics: emitted=1234 decodeErrors=0 incompleteFragments=5 unsupportedTypes=12 reconnects=1 fragmentBuffer=0 uptimeMs=123456
+----
+
+Counters:
+
+* `emitted` -- records successfully parsed and sent to Kafka
+* `decodeErrors` -- NMEA sentences that could not be decoded
+* `incompleteFragments` -- multi-sentence fragments not yet fully assembled
+* `unsupportedTypes` -- AIS message types not recognised by the decoder
+* `reconnects` -- number of TCP reconnections since the task started
+* `fragmentBuffer` -- incomplete fragments currently held in memory (log heartbeat only)
+* `uptimeMs` -- milliseconds since the current TCP connection epoch (log heartbeat only)
+
+On self-managed Kafka Connect workers with JMX enabled, the five cumulative counters (`emitted`, `decodeErrors`, `incompleteFragments`, `unsupportedTypes`, `reconnects`) are also exposed via JMX at ObjectName `net.rmoff.connect.ais:type=TaskMetrics,host=<host>,port=<port>`. The `fragmentBuffer` and `uptimeMs` values appear in the log heartbeat only — they are not on the MBean. The log heartbeat is the primary observability surface on runtimes without JMX access (e.g. Confluent Cloud Custom Connectors).
+
+Set `metrics.log.interval.ms=0` to disable the log heartbeat entirely.
 
 == Output schema
 
@@ -432,7 +495,7 @@ This is a TCP stream source connector, which is a bit different from the typical
 * `SO_TIMEOUT` on the socket prevents `poll()` from blocking forever on a stalled connection
 * `stop()` closes the socket from a different thread, which unblocks any pending read
 
-The connector declares `ExactlyOnceSupport.SUPPORTED`. AIS NMEA sentences are independently parseable and MMSI-keyed, the per-poll transaction boundary is safe, and each task tracks a `{connection_epoch, message_count}` offset per host. Practically this means "no duplicate writes within a connection" -- not end-to-end exactly-once, because the upstream TCP feed itself has no replay (messages during a connector outage are simply lost).
+The connector declares `ExactlyOnceSupport.UNSUPPORTED`. The upstream AIS TCP feed has no replay -- messages broadcast during a connector outage are simply lost -- so end-to-end exactly-once is impossible regardless of how Connect commits offsets. Each task does track a `{connection_epoch, message_count}` offset per host, but this is for monitoring rather than replay: the offset cannot be used to resume the stream where it left off.
 
 AIS message decoding is handled by https://github.com/dma-ais/AisLib[AisLib] from the Danish Maritime Authority.
 
@@ -445,7 +508,7 @@ Requires Java 11+ and Maven.
 mvn clean package
 ----
 
-The build produces two usable artifacts (where `<version>` matches the project version, e.g. `0.2.1`):
+The build produces two usable artifacts (where `<version>` matches the project version, e.g. `0.3.0`):
 
 * `target/components/packages/rmoff-kafka-connect-ais-<version>.zip` -- a Confluent component archive with a `manifest.json` (produced by the `kafka-connect-maven-plugin`). This is the canonical https://www.confluent.io/hub/[Confluent Hub] / Marketplace format, it's what each GitHub release ships, and it's the recommended `--plugin-file` for `confluent connect custom-plugin create` (it bundles the connector + its dependencies).
 * `target/kafka-connect-ais-<version>.jar` -- the shaded fat JAR. Drop it into a self-managed Connect worker's `plugin.path` directory.

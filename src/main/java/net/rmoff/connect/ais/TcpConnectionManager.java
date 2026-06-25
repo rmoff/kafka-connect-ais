@@ -14,39 +14,56 @@ import java.nio.charset.StandardCharsets;
 public class TcpConnectionManager {
 
     private static final Logger log = LoggerFactory.getLogger(TcpConnectionManager.class);
-    private static final int CONNECT_TIMEOUT_MS = 10000;
-    private static final int SO_TIMEOUT_MS = 1000;
+    // NMEA sentences are ~82 chars; with a tag block and AIS payload still well under this.
+    // Bounds memory against a malicious/garbled feed sending an unterminated line.
+    private static final int MAX_LINE_LENGTH = 1024;
 
     private final String host;
     private final int port;
     private final long initialBackoffMs;
     private final long maxBackoffMs;
+    private final int connectTimeoutMs;
+    private final int soTimeoutMs;
 
-    private Socket socket;
-    private BufferedReader reader;
+    private volatile Socket socket;
+    private volatile BufferedReader reader;
+    // Partial line carried across readLine() calls so a mid-line SO_TIMEOUT resumes
+    // correctly instead of corrupting the next sentence. Only touched by the task thread.
+    private final StringBuilder lineBuffer = new StringBuilder();
     private long currentBackoffMs;
     private long nextReconnectTime;
     private volatile boolean stopping;
     private volatile long lastDataReceivedAtMs;
+    // Whether the currently-open connection has delivered any data. The NCA feed
+    // routinely accepts a fresh socket then closes it without sending anything; such
+    // an unproductive connection must trigger reconnect backoff, while a connection
+    // that did deliver data resets the backoff. Task-thread only.
+    private boolean dataReceivedThisConnection;
 
-    public TcpConnectionManager(String host, int port, long initialBackoffMs, long maxBackoffMs) {
+    public TcpConnectionManager(String host, int port, long initialBackoffMs, long maxBackoffMs,
+                                int connectTimeoutMs, int soTimeoutMs) {
         this.host = host;
         this.port = port;
         this.initialBackoffMs = initialBackoffMs;
         this.maxBackoffMs = maxBackoffMs;
         this.currentBackoffMs = initialBackoffMs;
         this.nextReconnectTime = 0;
+        this.connectTimeoutMs = connectTimeoutMs;
+        this.soTimeoutMs = soTimeoutMs;
     }
 
     public void connect() throws IOException {
         log.info("Connecting to AIS endpoint {}:{}", host, port);
         socket = new Socket();
-        socket.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
-        socket.setSoTimeout(SO_TIMEOUT_MS);
+        socket.connect(new InetSocketAddress(host, port), connectTimeoutMs);
+        socket.setSoTimeout(soTimeoutMs);
         socket.setKeepAlive(true);
         reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
-        currentBackoffMs = initialBackoffMs;
-        nextReconnectTime = 0;
+        lineBuffer.setLength(0);  // drop any partial line left over from a dropped connection
+        // NB: do NOT reset the backoff here. A successful TCP connect does not mean the
+        // feed will actually deliver data — the backoff is cleared only once data arrives
+        // (see connectionEnded()), so a run of accept-then-close connections still backs off.
+        dataReceivedThisConnection = false;
         lastDataReceivedAtMs = System.currentTimeMillis();
         log.info("Connected to AIS endpoint {}:{}", host, port);
     }
@@ -54,16 +71,42 @@ public class TcpConnectionManager {
     /**
      * Read a line from the TCP stream.
      *
+     * <p>Reads character-by-character (rather than {@link BufferedReader#readLine()}) so the
+     * accumulated line length can be bounded: a feed that never sends a line terminator would
+     * otherwise let {@code readLine()} buffer without limit and exhaust the heap. A {@code
+     * SocketTimeoutException} mid-line is expected — the partial line is retained in
+     * {@code lineBuffer} and the next call resumes where it left off.
+     *
      * @return the line, or null if the connection was closed by the remote end
      * @throws SocketTimeoutException if SO_TIMEOUT elapsed with no data
-     * @throws IOException on connection error
+     * @throws IOException on connection error, or if a line exceeds {@link #MAX_LINE_LENGTH}
      */
     public String readLine() throws IOException {
-        String line = reader.readLine();
-        if (line != null) {
-            lastDataReceivedAtMs = System.currentTimeMillis();
+        int c;
+        while ((c = reader.read()) != -1) {
+            if (c == '\n') {
+                String line = lineBuffer.toString();
+                lineBuffer.setLength(0);
+                markDataReceived();
+                return line;
+            }
+            if (c != '\r') {
+                lineBuffer.append((char) c);
+                if (lineBuffer.length() > MAX_LINE_LENGTH) {
+                    lineBuffer.setLength(0);
+                    throw new IOException("Line exceeded maximum length of " + MAX_LINE_LENGTH
+                            + " bytes without a terminator; dropping connection");
+                }
+            }
         }
-        return line;
+        // Remote closed the stream. Flush any unterminated trailing line, else signal close.
+        if (lineBuffer.length() > 0) {
+            String line = lineBuffer.toString();
+            lineBuffer.setLength(0);
+            markDataReceived();
+            return line;
+        }
+        return null;
     }
 
     public boolean isConnected() {
@@ -147,6 +190,38 @@ public class TcpConnectionManager {
             }
             socket = null;
         }
+    }
+
+    private void markDataReceived() {
+        lastDataReceivedAtMs = System.currentTimeMillis();
+        dataReceivedThisConnection = true;
+    }
+
+    /**
+     * Record that the active connection has ended (remote EOF, read error, or the idle
+     * watchdog). Closes the socket and sets the reconnect schedule:
+     * <ul>
+     *   <li>If the connection delivered data, it was a genuine feed that dropped — reset
+     *       the backoff so we reconnect promptly.</li>
+     *   <li>If it delivered nothing (a starved / immediately-closed connection — the NCA
+     *       feed does this to fresh connections), apply the current backoff and grow it,
+     *       so a run of starved connections spaces out instead of hammering the feed at
+     *       tens of reconnects per minute.</li>
+     * </ul>
+     */
+    public void connectionEnded() {
+        if (dataReceivedThisConnection) {
+            currentBackoffMs = initialBackoffMs;
+            nextReconnectTime = 0;
+        } else {
+            nextReconnectTime = System.currentTimeMillis() + currentBackoffMs;
+            currentBackoffMs = Math.min(currentBackoffMs * 2, maxBackoffMs);
+        }
+        disconnect();
+    }
+
+    long currentBackoffMs() {
+        return currentBackoffMs;
     }
 
     public long getLastDataReceivedAtMs() {
